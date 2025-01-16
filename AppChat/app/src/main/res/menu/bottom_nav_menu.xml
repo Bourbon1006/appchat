@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/action_group_chat"
+        android:icon="@drawable/ic_group_chat"
+        android:title="群聊"/>
+    <item
+        android:id="@+id/action_user_list"
+        android:icon="@drawable/ic_user_list"
+        android:title="联系人"/>
+    <item
+        android:id="@+id/action_logout"
+        android:icon="@drawable/ic_logout"
+        android:title="退出"/>
+</menu> 

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_group_chat"
+        android:title="群聊"
+        android:icon="@drawable/ic_group_chat"
+        app:showAsAction="never"/>
+    <item
+        android:id="@+id/action_user_list"
+        android:title="用户列表"
+        android:icon="@drawable/ic_user_list"
+        app:showAsAction="never"/>
+    <item
+        android:id="@+id/action_logout"
+        android:title="退出登录"
+        android:icon="@drawable/ic_logout"
+        app:showAsAction="never"/>
+</menu> 
