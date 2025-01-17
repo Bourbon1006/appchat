@@ -12,27 +12,18 @@ class UserService(private val userRepository: UserRepository) {
     @Transactional
     fun setUserOnline(userId: Long, online: Boolean) {
         val user = getUser(userId)
-        println("Before update - User ${user.username}(id=${user.id}): online=${user.online}")  // 添加日志
         user.online = online
-        val savedUser = userRepository.save(user)
-        println("After update - User ${savedUser.username}(id=${savedUser.id}): online=${savedUser.online}")  // 添加日志
+        userRepository.save(user)
     }
 
     fun getOnlineUsers(): List<User> {
-        val users = userRepository.findByOnlineTrue()
-        println("Found ${users.size} online users:")  // 添加日志
-        users.forEach { user ->
-            println("- ${user.username}(id=${user.id}): online=${user.online}")  // 添加日志
-        }
-        return users
+        return userRepository.findByOnlineTrue()
     }
 
     fun getUser(userId: Long): User {
-        val user = userRepository.findById(userId).orElseThrow {
+        return userRepository.findById(userId).orElseThrow {
             RuntimeException("User not found with id: $userId")
         }
-        println("Retrieved user ${user.username}(id=${user.id}): online=${user.online}")  // 添加日志
-        return user
     }
 
     fun getAllUsers(): List<User> {

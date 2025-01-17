@@ -50,15 +50,13 @@ class User(
     }
 }
 
-@Converter(autoApply = true)  // 添加 autoApply = true
+@Converter(autoApply = true)
 class BooleanToIntConverter : AttributeConverter<Boolean, Int> {
     override fun convertToDatabaseColumn(attribute: Boolean?): Int {
-        println("Converting to DB: $attribute -> ${if (attribute == true) 1 else 0}")  // 添加日志
         return if (attribute == true) 1 else 0
     }
 
     override fun convertToEntityAttribute(dbData: Int?): Boolean {
-        println("Converting from DB: $dbData -> ${dbData == 1}")  // 添加日志
         return dbData == 1
     }
 }
