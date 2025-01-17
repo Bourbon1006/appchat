@@ -18,4 +18,7 @@ interface ApiService {
 
     @GET("api/users")
     fun getUsers(): Call<List<User>>
+
+    @GET("api/users/online")
+    fun getOnlineUsers(): Call<List<User>>
 } 

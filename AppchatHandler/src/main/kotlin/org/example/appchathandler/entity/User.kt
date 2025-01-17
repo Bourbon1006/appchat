@@ -5,23 +5,22 @@ import com.fasterxml.jackson.annotation.JsonIgnore
 
 @Entity
 @Table(name = "users")
-data class User(
+class User(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    val id: Long = 0,
+    var id: Long = 0,
     
     @Column(unique = true)
-    val username: String,
+    var username: String,
     
-    val password: String,
+    var password: String,
     
-    @Column(nullable = true)
     var nickname: String? = null,
     
-    @Column(nullable = true)
     var avatar: String? = null,
     
     @Column(name = "is_online")
+    @Convert(converter = BooleanToIntConverter::class)
     var online: Boolean = false,
 
     @JsonIgnore
@@ -35,6 +34,10 @@ data class User(
 ) {
     constructor() : this(0, "", "", null, null, false)
 
+    override fun toString(): String {
+        return "User(id=$id, username='$username', online=$online)"
+    }
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (javaClass != other?.javaClass) return false
@@ -45,4 +48,17 @@ data class User(
     override fun hashCode(): Int {
         return id.hashCode()
     }
-} 
+}
+
+@Converter(autoApply = true)  // 添加 autoApply = true
+class BooleanToIntConverter : AttributeConverter<Boolean, Int> {
+    override fun convertToDatabaseColumn(attribute: Boolean?): Int {
+        println("Converting to DB: $attribute -> ${if (attribute == true) 1 else 0}")  // 添加日志
+        return if (attribute == true) 1 else 0
+    }
+
+    override fun convertToEntityAttribute(dbData: Int?): Boolean {
+        println("Converting from DB: $dbData -> ${dbData == 1}")  // 添加日志
+        return dbData == 1
+    }
+}

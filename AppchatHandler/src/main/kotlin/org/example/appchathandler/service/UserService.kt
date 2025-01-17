@@ -9,21 +9,30 @@ import org.springframework.transaction.annotation.Transactional
 @Service
 class UserService(private val userRepository: UserRepository) {
     
-    fun getUser(userId: Long): User {
-        return userRepository.findById(userId).orElseThrow {
-            RuntimeException("User not found with id: $userId")
-        }
-    }
-
+    @Transactional
     fun setUserOnline(userId: Long, online: Boolean) {
-        userRepository.findById(userId).ifPresent { user ->
-            user.online = online
-            userRepository.save(user)
-        }
+        val user = getUser(userId)
+        println("Before update - User ${user.username}(id=${user.id}): online=${user.online}")  // 添加日志
+        user.online = online
+        val savedUser = userRepository.save(user)
+        println("After update - User ${savedUser.username}(id=${savedUser.id}): online=${savedUser.online}")  // 添加日志
     }
 
     fun getOnlineUsers(): List<User> {
-        return userRepository.findByOnlineTrue()
+        val users = userRepository.findByOnlineTrue()
+        println("Found ${users.size} online users:")  // 添加日志
+        users.forEach { user ->
+            println("- ${user.username}(id=${user.id}): online=${user.online}")  // 添加日志
+        }
+        return users
+    }
+
+    fun getUser(userId: Long): User {
+        val user = userRepository.findById(userId).orElseThrow {
+            RuntimeException("User not found with id: $userId")
+        }
+        println("Retrieved user ${user.username}(id=${user.id}): online=${user.online}")  // 添加日志
+        return user
     }
 
     fun getAllUsers(): List<User> {

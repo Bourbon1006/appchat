@@ -83,76 +83,114 @@ class ChatWebSocketHandler(
     override fun afterConnectionEstablished(session: WebSocketSession) {
         val userId = session.uri?.query?.substringAfter("userId=")?.toLongOrNull()
         if (userId != null) {
-            sessions[userId] = session
-            userService.setUserOnline(userId, true)
-            
-            val messages = messageService.getMessageHistory(userId)
-            val historyResponse = mapOf(
-                "type" to "history",
-                "messages" to messages.map { it.toDTO() }
-            )
-            session.sendMessage(TextMessage(objectMapper.writeValueAsString(historyResponse)))
+            try {
+                // 先获取用户信息
+                val user = userService.getUser(userId)
+                
+                // 设置用户在线状态
+                userService.setUserOnline(userId, true)
+                
+                // 保存会话
+                sessions[userId] = session
+                
+                // 获取在线用户列表（排除自己）
+                val onlineUsers = userService.getOnlineUsers()
+                    .filter { it.id != userId }
+                    .map { onlineUser ->
+                        UserStatusDTO(
+                            id = onlineUser.id,
+                            username = onlineUser.username,
+                            nickname = onlineUser.nickname,
+                            avatar = onlineUser.avatar,
+                            online = true  // 确保在线状态正确
+                        )
+                    }
+                
+                // 发送在线用户列表
+                session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
+                    "type" to "users",
+                    "users" to onlineUsers
+                ))))
 
-            val onlineUsers = userService.getOnlineUsers().map { user ->
-                UserStatusDTO(
+                // 广播新用户上线通知给其他用户
+                val newUserStatus = UserStatusDTO(
                     id = user.id,
                     username = user.username,
                     nickname = user.nickname,
                     avatar = user.avatar,
-                    online = user.online
+                    online = true
                 )
+                
+                sessions.values.forEach { s ->
+                    if (s != session) {
+                        s.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
+                            "type" to "userStatus",
+                            "user" to newUserStatus
+                        ))))
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                session.close()
             }
-            val usersResponse = mapOf(
-                "type" to "users",
-                "users" to onlineUsers
-            )
-            session.sendMessage(TextMessage(objectMapper.writeValueAsString(usersResponse)))
-
-            broadcastUserStatus(userId, true)
         }
     }
 
     override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
         try {
+            println("Received message: ${message.payload}")  // 添加日志
             val messageNode = objectMapper.readTree(message.payload)
-            val messageType = messageNode.get("messageType")?.asText() ?: "CHAT" // 默认为CHAT类型
+            val messageType = messageNode.get("type")?.asText() ?: "CHAT"
             
             when (messageType) {
-                "CHAT" -> handleChatMessage(messageNode)
+                "CHAT" -> {
+                    val senderId = messageNode.get("senderId").asLong()
+                    val senderName = messageNode.get("senderName")?.asText()
+                    val content = messageNode.get("content").asText()
+                    val receiverId = messageNode.get("receiverId")?.asLong()
+                    
+                    val sender = userService.getUser(senderId)
+                    val receiver = receiverId?.let { userService.getUser(it) }
+                    
+                    val savedMessage = messageService.saveMessage(
+                        Message(
+                            sender = sender,
+                            receiver = receiver,
+                            content = content,
+                            type = MessageType.TEXT
+                        )
+                    )
+
+                    // 发送给接收者
+                    receiverId?.let { rid ->
+                        sessions[rid]?.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
+                            "type" to "message",
+                            "message" to savedMessage.toDTO()
+                        ))))
+                    }
+
+                    // 发送给发送者（确认消息已发送）
+                    sessions[senderId]?.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
+                        "type" to "message",
+                        "message" to savedMessage.toDTO()
+                    ))))
+                }
                 "FILE" -> handleFileTransfer(messageNode)
                 else -> {
-                    val errorResponse = mapOf(
+                    session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
                         "type" to "error",
                         "message" to "Unsupported message type: $messageType"
-                    )
-                    session.sendMessage(TextMessage(objectMapper.writeValueAsString(errorResponse)))
+                    ))))
                 }
             }
         } catch (e: Exception) {
-            val errorResponse = mapOf(
+            e.printStackTrace()
+            println("Error message payload: ${message.payload}")  // 添加错误消息日志
+            session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
                 "type" to "error",
                 "message" to "Failed to process message: ${e.message}"
-            )
-            session.sendMessage(TextMessage(objectMapper.writeValueAsString(errorResponse)))
+            ))))
         }
-    }
-
-    private fun handleChatMessage(messageNode: JsonNode) {
-        val chatMessage = objectMapper.treeToValue(messageNode, WebSocketMessage.ChatMessage::class.java)
-        val sender = userService.getUser(chatMessage.senderId)
-        val receiver = chatMessage.receiverId?.let { userService.getUser(it) }
-        
-        val savedMessage = messageService.saveMessage(
-            Message(
-                sender = sender,
-                receiver = receiver,
-                content = chatMessage.content,
-                type = chatMessage.type,
-                fileUrl = chatMessage.fileUrl
-            )
-        )
-
-        broadcastMessage(chatMessage.receiverId, savedMessage)
     }
 
     private fun handleFileTransfer(messageNode: JsonNode) {
@@ -167,44 +205,28 @@ class ChatWebSocketHandler(
         sessions[fileTransfer.senderId]?.sendMessage(TextMessage(json))
     }
 
-    private fun broadcastMessage(receiverId: Long?, message: Message) {
-        val response = mapOf(
-            "type" to "message",
-            "message" to message.toDTO()
-        )
-        val messageJson = objectMapper.writeValueAsString(response)
-
-        if (receiverId == null) {
-            sessions.values.forEach { it.sendMessage(TextMessage(messageJson)) }
-        } else {
-            sessions[receiverId]?.sendMessage(TextMessage(messageJson))
-            sessions[message.sender.id]?.sendMessage(TextMessage(messageJson))
-        }
-    }
-
     override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
         val userId = session.uri?.query?.substringAfter("userId=")?.toLongOrNull()
         if (userId != null) {
             sessions.remove(userId)
             userService.setUserOnline(userId, false)
-            broadcastUserStatus(userId, false)
+            
+            // 广播用户下线通知
+            val user = userService.getUser(userId)
+            val offlineStatus = UserStatusDTO(
+                id = user.id,
+                username = user.username,
+                nickname = user.nickname,
+                avatar = user.avatar,
+                online = false
+            )
+            
+            val statusJson = objectMapper.writeValueAsString(mapOf(
+                "type" to "userStatus",
+                "user" to offlineStatus
+            ))
+            
+            sessions.values.forEach { it.sendMessage(TextMessage(statusJson)) }
         }
-    }
-
-    private fun broadcastUserStatus(userId: Long, online: Boolean) {
-        val user = userService.getUser(userId)
-        val statusUpdate = UserStatusDTO(
-            id = user.id,
-            username = user.username,
-            nickname = user.nickname,
-            avatar = user.avatar,
-            online = online
-        )
-        val response = mapOf(
-            "type" to "userStatus",
-            "user" to statusUpdate
-        )
-        val statusJson = objectMapper.writeValueAsString(response)
-        sessions.values.forEach { it.sendMessage(TextMessage(statusJson)) }
     }
 } 

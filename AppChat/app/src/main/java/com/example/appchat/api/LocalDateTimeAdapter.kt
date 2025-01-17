@@ -3,17 +3,14 @@ package com.example.appchat.api
 import com.google.gson.*
 import java.lang.reflect.Type
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 class LocalDateTimeAdapter : JsonSerializer<LocalDateTime>, JsonDeserializer<LocalDateTime> {
-    private val formatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME
-
     override fun serialize(
         src: LocalDateTime?,
         typeOfSrc: Type?,
         context: JsonSerializationContext?
     ): JsonElement {
-        return JsonPrimitive(formatter.format(src))
+        return JsonPrimitive(src.toString())
     }
 
     override fun deserialize(
@@ -21,6 +18,20 @@ class LocalDateTimeAdapter : JsonSerializer<LocalDateTime>, JsonDeserializer<Loc
         typeOfT: Type?,
         context: JsonDeserializationContext?
     ): LocalDateTime {
-        return LocalDateTime.parse(json?.asString, formatter)
+        if (json is JsonArray) {
+            // 处理数组格式的时间戳 [year, month, day, hour, minute, second, nano]
+            return LocalDateTime.of(
+                json.get(0).asInt,  // year
+                json.get(1).asInt,  // month
+                json.get(2).asInt,  // day
+                json.get(3).asInt,  // hour
+                json.get(4).asInt,  // minute
+                json.get(5).asInt,  // second
+                json.get(6).asInt   // nanosecond
+            )
+        } else {
+            // 如果是字符串格式，使用 parse
+            return LocalDateTime.parse(json?.asString)
+        }
     }
 } 
