@@ -5,6 +5,9 @@ import com.example.appchat.model.RegisterRequest
 import com.example.appchat.model.AuthResponse
 import com.example.appchat.model.User
 import com.example.appchat.model.FriendRequest
+import com.example.appchat.model.Group
+import com.example.appchat.model.CreateGroupRequest
+import com.example.appchat.model.ChatMessage
 import retrofit2.Call
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -12,6 +15,7 @@ import retrofit2.http.POST
 import retrofit2.http.Query
 import retrofit2.http.Path
 import retrofit2.http.PUT
+import retrofit2.http.DELETE
 
 interface ApiService {
     @POST("api/auth/login")
@@ -40,4 +44,31 @@ interface ApiService {
         @Path("requestId") requestId: Long,
         @Body request: Map<String, Boolean>
     ): Call<FriendRequest>
+
+    @GET("/api/groups/user/{userId}")
+    fun getUserGroups(@Path("userId") userId: Long): Call<List<Group>>
+
+    @POST("/api/groups")
+    fun createGroup(@Body request: CreateGroupRequest): Call<Group>
+
+    @GET("groups/{groupId}")
+    fun getGroupById(@Path("groupId") groupId: Long): Call<Group>
+
+    @POST("/api/groups/{groupId}/members/{userId}")
+    fun addGroupMember(
+        @Path("groupId") groupId: Long,
+        @Path("userId") userId: Long
+    ): Call<Group>
+
+    @DELETE("/api/groups/{groupId}/members/{userId}")
+    fun removeGroupMember(
+        @Path("groupId") groupId: Long,
+        @Path("userId") userId: Long
+    ): Call<Group>
+
+    @PUT("groups/{groupId}")
+    fun updateGroup(@Path("groupId") groupId: Long, @Body group: Group): Call<Group>
+
+    @GET("groups/{groupId}/messages")
+    fun getGroupMessages(@Path("groupId") groupId: Long): Call<List<ChatMessage>>
 } 

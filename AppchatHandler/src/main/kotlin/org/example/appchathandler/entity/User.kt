@@ -14,6 +14,7 @@ class User(
     var username: String,
     
     @JsonIgnore
+    @Column(length = 60)
     var password: String,
     
     var nickname: String? = null,
@@ -21,7 +22,6 @@ class User(
     var avatar: String? = null,
     
     @Column(name = "is_online")
-    @Convert(converter = BooleanToIntConverter::class)
     var online: Boolean = false,
 
     @JsonIgnore
@@ -31,24 +31,15 @@ class User(
         joinColumns = [JoinColumn(name = "user_id")],
         inverseJoinColumns = [JoinColumn(name = "contact_id")]
     )
-    var contacts: MutableSet<User> = mutableSetOf()
+    var contacts: MutableSet<User> = mutableSetOf(),
+
+    @ManyToMany(mappedBy = "members")
+    var groups: MutableSet<Group> = mutableSetOf()
 ) {
-    constructor() : this(0, "", "", null, null, false)
-
-    override fun toString(): String {
-        return "User(id=$id, username='$username', online=$online)"
-    }
-
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-        other as User
-        return id == other.id
-    }
-
-    override fun hashCode(): Int {
-        return id.hashCode()
-    }
+    constructor() : this(
+        username = "",
+        password = ""
+    )
 }
 
 @Converter(autoApply = true)

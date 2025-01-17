@@ -5,36 +5,39 @@ import java.time.LocalDateTime
 
 @Entity
 @Table(name = "messages")
-data class Message(
+class Message(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    val id: Long = 0,
+    var id: Long = 0,
+
+    var content: String,
+
+    var timestamp: LocalDateTime = LocalDateTime.now(),
 
     @ManyToOne
     @JoinColumn(name = "sender_id")
-    val sender: User,
+    var sender: User,
 
     @ManyToOne
     @JoinColumn(name = "receiver_id")
-    val receiver: User? = null,
+    var receiver: User? = null,
 
-    @Column(columnDefinition = "TEXT")
-    val content: String,
+    @ManyToOne
+    @JoinColumn(name = "group_id")
+    var group: Group? = null,
 
     @Enumerated(EnumType.STRING)
-    val type: MessageType,
+    @Column(name = "message_type")
+    var type: MessageType = MessageType.TEXT,
 
-    @Column(nullable = true)
-    val fileUrl: String? = null,
+    @Column(name = "file_url")
+    var fileUrl: String? = null,
 
-    val timestamp: LocalDateTime = LocalDateTime.now(),
-
+    @Column(name = "is_read")
     var isRead: Boolean = false
 ) {
     constructor() : this(
-        id = 0,
-        sender = User(),
         content = "",
-        type = MessageType.TEXT
+        sender = User()
     )
 }

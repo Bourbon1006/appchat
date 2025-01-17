@@ -3,35 +3,18 @@ package com.example.appchat.util
 import android.content.Context
 
 object UserPreferences {
-    private const val PREF_NAME = "UserPrefs"
-    private const val KEY_TOKEN = "token"
-    private const val KEY_USER_ID = "user_id"
+    private const val PREF_NAME = "AppChatPrefs"
+    private const val KEY_USER_ID = "userId"
     private const val KEY_USERNAME = "username"
+    private const val KEY_TOKEN = "token"
 
-    fun saveToken(context: Context, token: String) {
-        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_TOKEN, token)
-            .apply()
-    }
-
-    fun saveUserId(context: Context, userId: Long) {
-        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putLong(KEY_USER_ID, userId)
-            .apply()
-    }
-
-    fun saveUsername(context: Context, username: String) {
-        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_USERNAME, username)
-            .apply()
-    }
-
-    fun getToken(context: Context): String? {
-        return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-            .getString(KEY_TOKEN, null)
+    fun saveUserInfo(context: Context, userId: Long, username: String, token: String?) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE).edit().apply {
+            putLong(KEY_USER_ID, userId)
+            putString(KEY_USERNAME, username)
+            token?.let { putString(KEY_TOKEN, it) }  // 只在 token 不为空时保存
+            apply()
+        }
     }
 
     fun getUserId(context: Context): Long {
@@ -39,9 +22,14 @@ object UserPreferences {
             .getLong(KEY_USER_ID, -1)
     }
 
-    fun getUsername(context: Context): String? {
+    fun getUsername(context: Context): String {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-            .getString(KEY_USERNAME, null)
+            .getString(KEY_USERNAME, "") ?: ""
+    }
+
+    fun getToken(context: Context): String? {
+        return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_TOKEN, null)
     }
 
     fun clear(context: Context) {

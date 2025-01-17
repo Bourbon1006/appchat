@@ -3,11 +3,18 @@ package org.example.appchathandler.service
 import org.example.appchathandler.controller.UserController.UpdateUserRequest
 import org.example.appchathandler.entity.User
 import org.example.appchathandler.repository.UserRepository
+import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.util.NoSuchElementException
+import org.example.appchathandler.dto.UserDTO
+import org.example.appchathandler.dto.toDTO
 
 @Service
-class UserService(private val userRepository: UserRepository) {
+class UserService(
+    private val userRepository: UserRepository,
+    private val passwordEncoder: PasswordEncoder
+) {
     
     @Transactional
     fun setUserOnline(userId: Long, online: Boolean) {
@@ -16,39 +23,37 @@ class UserService(private val userRepository: UserRepository) {
         userRepository.save(user)
     }
 
-    fun getOnlineUsers(): List<User> {
-        return userRepository.findByOnlineTrue()
+    fun getOnlineUsers(): List<UserDTO> {
+        return userRepository.findByOnlineTrue().map { it.toDTO() }
     }
 
     fun getUser(userId: Long): User {
-        return userRepository.findById(userId).orElseThrow {
-            RuntimeException("User not found with id: $userId")
-        }
+        return userRepository.findById(userId).orElseThrow { NoSuchElementException("用户不存在") }
     }
 
-    fun getAllUsers(): List<User> {
-        return userRepository.findAll()
+    fun getAllUsers(): List<UserDTO> {
+        return userRepository.findAll().map { it.toDTO() }
     }
 
     @Transactional
-    fun updateUser(userId: Long, request: UpdateUserRequest): User {
+    fun updateUser(userId: Long, request: UpdateUserRequest): UserDTO {
         val user = getUser(userId)
         request.nickname?.let { user.nickname = it }
         request.avatar?.let { user.avatar = it }
-        return userRepository.save(user)
+        return userRepository.save(user).toDTO()
     }
 
     @Transactional
-    fun getUserContacts(userId: Long): List<User> {
-        return getUser(userId).contacts.toList()
+    fun getUserContacts(userId: Long): List<UserDTO> {
+        return getUser(userId).contacts.map { it.toDTO() }
     }
 
     @Transactional
-    fun addContact(userId: Long, contactId: Long): User {
+    fun addContact(userId: Long, contactId: Long): UserDTO {
         val user = getUser(userId)
         val contact = getUser(contactId)
         user.contacts.add(contact)
-        return userRepository.save(user)
+        return userRepository.save(user).toDTO()
     }
 
     fun createUser(username: String, password: String): User {
@@ -58,28 +63,20 @@ class UserService(private val userRepository: UserRepository) {
         
         val user = User(
             username = username,
-            password = hashPassword(password)
+            password = passwordEncoder.encode(password)
         )
         return userRepository.save(user)
     }
 
-    fun authenticate(username: String, password: String): User {
-        val user = userRepository.findByUsername(username)
-            ?: throw IllegalArgumentException("用户不存在")
-            
-        if (user.password != hashPassword(password)) {
+    fun getUserByUsername(username: String): User? {
+        return userRepository.findByUsername(username)
+    }
+
+    fun validateUser(username: String, password: String): UserDTO {
+        val user = getUserByUsername(username) ?: throw IllegalArgumentException("用户不存在")
+        if (!passwordEncoder.matches(password, user.password)) {
             throw IllegalArgumentException("密码错误")
         }
-        
-        return user
-    }
-
-    private fun hashPassword(password: String): String {
-        // 实际应用中应该使用proper密码加密
-        return password
-    }
-
-    fun searchUsers(keyword: String): List<User> {
-        return userRepository.findByUsernameContainingIgnoreCase(keyword)
+        return user.toDTO()
     }
 } 

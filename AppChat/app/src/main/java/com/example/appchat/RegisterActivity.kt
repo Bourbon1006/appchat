@@ -2,9 +2,10 @@ package com.example.appchat
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
-import android.widget.TextView
+import android.widget.ProgressBar
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.example.appchat.api.ApiClient
@@ -20,21 +21,17 @@ class RegisterActivity : AppCompatActivity() {
     private lateinit var passwordInput: EditText
     private lateinit var confirmPasswordInput: EditText
     private lateinit var registerButton: Button
-    private lateinit var loginLink: TextView
+    private lateinit var progressBar: ProgressBar
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_register)
 
-        setupViews()
-    }
-
-    private fun setupViews() {
         usernameInput = findViewById(R.id.usernameInput)
         passwordInput = findViewById(R.id.passwordInput)
         confirmPasswordInput = findViewById(R.id.confirmPasswordInput)
         registerButton = findViewById(R.id.registerButton)
-        loginLink = findViewById(R.id.loginLink)
+        progressBar = findViewById(R.id.progressBar)
 
         registerButton.setOnClickListener {
             val username = usernameInput.text.toString()
@@ -51,40 +48,40 @@ class RegisterActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            ApiClient.service.register(RegisterRequest(username, password))
-                .enqueue(object : Callback<AuthResponse> {
-                    override fun onResponse(
-                        call: Call<AuthResponse>,
-                        response: Response<AuthResponse>
-                    ) {
-                        if (response.isSuccessful) {
-                            response.body()?.let { authResponse ->
-                                if (authResponse.userId != -1L) {
-                                    UserPreferences.saveToken(this@RegisterActivity, authResponse.token)
-                                    UserPreferences.saveUserId(this@RegisterActivity, authResponse.userId)
-                                    UserPreferences.saveUsername(this@RegisterActivity, authResponse.username)
-                                    startActivity(Intent(this@RegisterActivity, MainActivity::class.java))
-                                    finish()
-                                } else {
-                                    Toast.makeText(this@RegisterActivity, 
-                                        authResponse.message ?: "注册失败", 
-                                        Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        } else {
-                            Toast.makeText(this@RegisterActivity, "注册失败", Toast.LENGTH_SHORT).show()
+            progressBar.visibility = View.VISIBLE
+            registerButton.isEnabled = false
+
+            val request = RegisterRequest(username, password)
+            ApiClient.service.register(request).enqueue(object : Callback<AuthResponse> {
+                override fun onResponse(call: Call<AuthResponse>, response: Response<AuthResponse>) {
+                    progressBar.visibility = View.GONE
+                    registerButton.isEnabled = true
+
+                    if (response.isSuccessful) {
+                        response.body()?.let { authResponse ->
+                            // 保存用户信息
+                            UserPreferences.saveUserInfo(
+                                context = this@RegisterActivity,
+                                userId = authResponse.userId,
+                                username = authResponse.username,
+                                token = authResponse.token
+                            )
+
+                            Toast.makeText(this@RegisterActivity, "注册成功", Toast.LENGTH_SHORT).show()
+                            startActivity(Intent(this@RegisterActivity, MainActivity::class.java))
+                            finish()
                         }
+                    } else {
+                        Toast.makeText(this@RegisterActivity, "注册失败", Toast.LENGTH_SHORT).show()
                     }
+                }
 
-                    override fun onFailure(call: Call<AuthResponse>, t: Throwable) {
-                        Toast.makeText(this@RegisterActivity, "网络错误", Toast.LENGTH_SHORT).show()
-                    }
-                })
-        }
-
-        loginLink.setOnClickListener {
-            startActivity(Intent(this, LoginActivity::class.java))
-            finish()
+                override fun onFailure(call: Call<AuthResponse>, t: Throwable) {
+                    progressBar.visibility = View.GONE
+                    registerButton.isEnabled = true
+                    Toast.makeText(this@RegisterActivity, "网络错误", Toast.LENGTH_SHORT).show()
+                }
+            })
         }
     }
 } 
