@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ProgressBar
@@ -16,6 +17,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.appchat.adapter.MessageAdapter
 import com.example.appchat.adapter.UserAdapter
+import com.example.appchat.adapter.ContactAdapter
+import com.example.appchat.adapter.SearchUserAdapter
 import com.example.appchat.api.ApiClient
 import com.example.appchat.api.LocalDateTimeAdapter
 import com.example.appchat.model.ChatMessage
@@ -34,16 +37,8 @@ import retrofit2.Response
 import java.util.concurrent.TimeUnit
 import java.time.LocalDateTime
 import com.google.android.material.bottomnavigation.BottomNavigationView
-
-// 首先添加一个数据类来表示 WebSocket 消息
-data class WebSocketMessage(
-    val type: String,
-    val messages: List<ChatMessage>? = null,
-    val message: ChatMessage? = null,
-    val users: List<User>? = null,
-    val user: User? = null,
-    val error: String? = null
-)
+import com.example.appchat.model.FriendRequest
+import com.example.appchat.model.WebSocketMessage
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webSocket: WebSocket
@@ -66,6 +61,7 @@ class MainActivity : AppCompatActivity() {
         .create()
     private var currentChatUserId: Long? = null
     private var currentUserAdapter: UserAdapter? = null
+    private var contactAdapter: ContactAdapter? = null
 
     private fun WebSocket.sendDebug(message: Any) {
         val json = gson.toJson(message)
@@ -90,8 +86,8 @@ class MainActivity : AppCompatActivity() {
                     messageAdapter.clearMessages()
                     true
                 }
-                R.id.action_user_list -> {
-                    showUserListDialog()
+                R.id.action_contacts -> {
+                    showContactsDialog()
                     true
                 }
                 R.id.action_logout -> {
@@ -140,15 +136,20 @@ class MainActivity : AppCompatActivity() {
             .build()
 
         val userId = UserPreferences.getUserId(this)
+        val wsUrl = getString(
+            R.string.server_ws_url_format,
+            getString(R.string.server_ip),
+            getString(R.string.server_port)
+        )
         val request = Request.Builder()
-            .url("ws://192.168.1.167:8080/chat?userId=$userId")
+            .url("$wsUrl?userId=$userId")
             .build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) {
                 runOnUiThread {
                     try {
-                        println("Received WebSocket message: $text")  // 添加日志
+                        println("Received WebSocket message: $text")
                         val wsMessage = gson.fromJson(text, WebSocketMessage::class.java)
                         when (wsMessage.type) {
                             "history" -> {
@@ -165,13 +166,13 @@ class MainActivity : AppCompatActivity() {
                             }
                             "users" -> {
                                 wsMessage.users?.let { users ->
-                                    println("Processing users message: ${users.map { "${it.username}(${it.isOnline})" }}")  // 添加日志
+                                    println("Processing users message: ${users.map { "${it.username}(${it.isOnline})" }}")
                                     updateUserList(users)
                                 }
                             }
                             "userStatus" -> {
                                 wsMessage.user?.let { user ->
-                                    println("Processing user status message: ${user.username}(${user.isOnline})")  // 添加日志
+                                    println("Processing user status message: ${user.username}(${user.isOnline})")
                                     updateUserStatus(user)
                                 }
                             }
@@ -180,11 +181,33 @@ class MainActivity : AppCompatActivity() {
                                     Toast.makeText(this@MainActivity, error, Toast.LENGTH_SHORT).show()
                                 }
                             }
+                            "friendRequest" -> {
+                                wsMessage.friendRequest?.let { request ->
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        "收到来自 ${request.sender.username} 的好友请求",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    showFriendRequestDialog(request)
+                                }
+                            }
+                            "friendRequestSent" -> {
+                                Toast.makeText(this@MainActivity, "好友请求已发送", Toast.LENGTH_SHORT).show()
+                            }
+                            "friendRequestResult" -> {
+                                wsMessage.friendRequest?.let { request ->
+                                    val message = when (request.status) {
+                                        "ACCEPTED" -> "${request.receiver.username} 接受了你的好友请求"
+                                        "REJECTED" -> "${request.receiver.username} 拒绝了你的好友请求"
+                                        else -> "好友请求状态更新"
+                                    }
+                                    Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+                                }
+                            }
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        println("Error parsing message: $text")  // 添加错误消息日志
-                        Toast.makeText(this@MainActivity, "消息处理错误: ${e.message}", Toast.LENGTH_SHORT).show()
+                        println("Error parsing message: $text")
                     }
                 }
             }
@@ -207,46 +230,173 @@ class MainActivity : AppCompatActivity() {
         currentUserAdapter?.updateUserStatus(user)
     }
 
-    private fun showUserListDialog() {
+    private fun showContactsDialog() {
         val dialog = AlertDialog.Builder(this)
-            .setTitle("选择聊天对象")
+            .setTitle("联系人")
             .create()
 
-        val view = layoutInflater.inflate(R.layout.dialog_user_list, null)
-        val userList = view.findViewById<RecyclerView>(R.id.userList)
+        val view = layoutInflater.inflate(R.layout.dialog_contacts, null)
+        val contactsList = view.findViewById<RecyclerView>(R.id.contactsList)
         val progressBar = view.findViewById<ProgressBar>(R.id.progressBar)
-        
-        val userAdapter = UserAdapter(UserPreferences.getUserId(this)) { user ->
+        val searchInput = view.findViewById<EditText>(R.id.searchInput)
+        val searchButton = view.findViewById<Button>(R.id.searchButton)
+
+        // 设置联系人适配器
+        var adapter = ContactAdapter { user ->
             currentChatUserId = user.id
             title = "与 ${user.username} 聊天中"
             messageAdapter.clearMessages()
             dialog.dismiss()
         }
-        currentUserAdapter = userAdapter  // 保存引用以便更新
+        contactAdapter = adapter
 
-        userList.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
-            adapter = userAdapter
+        // 设置搜索结果适配器
+        val searchAdapter = SearchUserAdapter(UserPreferences.getUserId(this)) { user ->
+            webSocket.sendDebug(mapOf(
+                "type" to "FRIEND_REQUEST",
+                "senderId" to UserPreferences.getUserId(this),
+                "receiverId" to user.id
+            ))
+            Toast.makeText(this, "已发送好友请求", Toast.LENGTH_SHORT).show()
         }
 
-        // 获取用户列表
-        ApiClient.service.getOnlineUsers().enqueue(object : Callback<List<User>> {
-            override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
-                progressBar.visibility = View.GONE
-                if (response.isSuccessful) {
-                    response.body()?.let { users ->
-                        userAdapter.updateUsers(users)
-                    }
-                } else {
-                    Toast.makeText(this@MainActivity, "获取用户列表失败", Toast.LENGTH_SHORT).show()
-                }
-            }
+        contactsList.apply {
+            layoutManager = LinearLayoutManager(this@MainActivity)
+            this.adapter = adapter
+        }
 
-            override fun onFailure(call: Call<List<User>>, t: Throwable) {
-                progressBar.visibility = View.GONE
-                Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
+        // 加载联系人列表
+        loadContacts(adapter, progressBar)
+
+        // 设置搜索功能
+        fun performSearch(keyword: String) {
+            if (keyword.isNotEmpty()) {
+                progressBar.visibility = View.VISIBLE
+                contactsList.adapter = searchAdapter
+                
+                ApiClient.service.searchUsers(keyword)
+                    .enqueue(object : Callback<List<User>> {
+                        override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
+                            progressBar.visibility = View.GONE
+                            if (response.isSuccessful) {
+                                response.body()?.let { users ->
+                                    searchAdapter.updateUsers(users)
+                                }
+                            } else {
+                                Toast.makeText(this@MainActivity, "搜索失败", Toast.LENGTH_SHORT).show()
+                                contactsList.adapter = adapter
+                            }
+                        }
+
+                        override fun onFailure(call: Call<List<User>>, t: Throwable) {
+                            progressBar.visibility = View.GONE
+                            Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
+                            contactsList.adapter = adapter
+                        }
+                    })
+            } else {
+                contactsList.adapter = adapter
             }
-        })
+        }
+
+        // 搜索按钮点击事件
+        searchButton.setOnClickListener {
+            performSearch(searchInput.text.toString())
+        }
+
+        // 搜索框回车事件
+        searchInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                performSearch(searchInput.text.toString())
+                true
+            } else {
+                false
+            }
+        }
+
+        dialog.setView(view)
+        dialog.show()
+    }
+
+    private fun loadContacts(adapter: ContactAdapter, progressBar: ProgressBar) {
+        progressBar.visibility = View.VISIBLE
+        ApiClient.service.getUserContacts(UserPreferences.getUserId(this))
+            .enqueue(object : Callback<List<User>> {
+                override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
+                    progressBar.visibility = View.GONE
+                    if (response.isSuccessful) {
+                        response.body()?.let { contacts ->
+                            adapter.updateContacts(contacts)
+                            if (contacts.isEmpty()) {
+                                Toast.makeText(this@MainActivity, "暂无联系人", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    } else {
+                        Toast.makeText(this@MainActivity, "获取联系人列表失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                override fun onFailure(call: Call<List<User>>, t: Throwable) {
+                    progressBar.visibility = View.GONE
+                    Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
+                }
+            })
+    }
+
+    private fun showSearchDialog() {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("搜索用户")
+            .create()
+
+        val view = layoutInflater.inflate(R.layout.dialog_search_user, null)
+        val searchInput = view.findViewById<EditText>(R.id.searchInput)
+        val searchResults = view.findViewById<RecyclerView>(R.id.searchResults)
+        val progressBar = view.findViewById<ProgressBar>(R.id.progressBar)
+
+        val adapter = SearchUserAdapter(UserPreferences.getUserId(this)) { user ->
+            // 发送好友请求
+            webSocket.sendDebug(mapOf(
+                "type" to "FRIEND_REQUEST",
+                "senderId" to UserPreferences.getUserId(this),
+                "receiverId" to user.id
+            ))
+            Toast.makeText(this, "已发送好友请求", Toast.LENGTH_SHORT).show()
+        }
+
+        searchResults.apply {
+            layoutManager = LinearLayoutManager(this@MainActivity)
+            this.adapter = adapter
+        }
+
+        searchInput.setOnEditorActionListener { v, actionId, event ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                val keyword = searchInput.text.toString()
+                if (keyword.isNotEmpty()) {
+                    progressBar.visibility = View.VISIBLE
+                    ApiClient.service.searchUsers(keyword)
+                        .enqueue(object : Callback<List<User>> {
+                            override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
+                                progressBar.visibility = View.GONE
+                                if (response.isSuccessful) {
+                                    response.body()?.let { users ->
+                                        adapter.updateUsers(users)
+                                    }
+                                } else {
+                                    Toast.makeText(this@MainActivity, "搜索失败", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+
+                            override fun onFailure(call: Call<List<User>>, t: Throwable) {
+                                progressBar.visibility = View.GONE
+                                Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
+                            }
+                        })
+                }
+                true
+            } else {
+                false
+            }
+        }
 
         dialog.setView(view)
         dialog.show()
@@ -257,6 +407,27 @@ class MainActivity : AppCompatActivity() {
         webSocket.close(1000, "User logged out")
         startActivity(Intent(this, LoginActivity::class.java))
         finish()
+    }
+
+    private fun showFriendRequestDialog(request: FriendRequest) {
+        AlertDialog.Builder(this)
+            .setTitle("好友请求")
+            .setMessage("${request.sender.username} 想添加你为好友")
+            .setPositiveButton("接受") { _, _ ->
+                webSocket.sendDebug(mapOf(
+                    "type" to "HANDLE_FRIEND_REQUEST",
+                    "requestId" to request.id,
+                    "accept" to true
+                ))
+            }
+            .setNegativeButton("拒绝") { _, _ ->
+                webSocket.sendDebug(mapOf(
+                    "type" to "HANDLE_FRIEND_REQUEST",
+                    "requestId" to request.id,
+                    "accept" to false
+                ))
+            }
+            .show()
     }
 
     override fun onDestroy() {

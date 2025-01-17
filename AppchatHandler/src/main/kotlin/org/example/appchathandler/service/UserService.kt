@@ -78,4 +78,8 @@ class UserService(private val userRepository: UserRepository) {
         // 实际应用中应该使用proper密码加密
         return password
     }
+
+    fun searchUsers(keyword: String): List<User> {
+        return userRepository.findByUsernameContainingIgnoreCase(keyword)
+    }
 } 

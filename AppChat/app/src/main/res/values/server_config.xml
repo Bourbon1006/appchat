@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="server_http_url_format">http://%1$s:%2$s/</string>
+    <string name="server_ws_url_format">ws://%1$s:%2$s/chat</string>
+</resources> 

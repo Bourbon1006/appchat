@@ -2,11 +2,15 @@ package org.example.appchathandler.controller
 
 import org.example.appchathandler.entity.User
 import org.example.appchathandler.service.UserService
+import org.example.appchathandler.service.FriendRequestService
 import org.springframework.web.bind.annotation.*
 
 @RestController
 @RequestMapping("/api/users")
-class UserController(private val userService: UserService) {
+class UserController(
+    private val userService: UserService,
+    private val friendRequestService: FriendRequestService
+) {
 
     @GetMapping
     fun getUsers(): List<UserDTO> {
@@ -44,6 +48,11 @@ class UserController(private val userService: UserService) {
     @GetMapping("/all")
     fun getAllUsers(): List<UserDTO> {
         return userService.getAllUsers().map { it.toDTO() }
+    }
+
+    @GetMapping("/search")
+    fun searchUsers(@RequestParam keyword: String): List<UserDTO> {
+        return userService.searchUsers(keyword).map { it.toDTO() }
     }
 
     data class UpdateUserRequest(

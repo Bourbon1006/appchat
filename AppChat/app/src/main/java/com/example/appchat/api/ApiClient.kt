@@ -7,9 +7,19 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 import java.time.LocalDateTime
+import android.content.Context
+import com.example.appchat.R
 
 object ApiClient {
-    private const val BASE_URL = "http://192.168.1.167:8080/"
+    private var BASE_URL: String = ""
+
+    fun init(context: Context) {
+        BASE_URL = context.getString(
+            R.string.server_http_url_format,
+            context.getString(R.string.server_ip),
+            context.getString(R.string.server_port)
+        )
+    }
 
     private val okHttpClient = OkHttpClient.Builder()
         .addInterceptor(HttpLoggingInterceptor().apply {
@@ -24,11 +34,13 @@ object ApiClient {
         .registerTypeAdapter(LocalDateTime::class.java, LocalDateTimeAdapter())
         .create()
 
-    private val retrofit = Retrofit.Builder()
-        .baseUrl(BASE_URL)
-        .client(okHttpClient)
-        .addConverterFactory(GsonConverterFactory.create(gson))
-        .build()
+    private val retrofit by lazy {
+        Retrofit.Builder()
+            .baseUrl(BASE_URL)
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create(gson))
+            .build()
+    }
 
-    val service: ApiService = retrofit.create(ApiService::class.java)
+    val service: ApiService by lazy { retrofit.create(ApiService::class.java) }
 } 
