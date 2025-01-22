@@ -172,56 +172,20 @@ class ChatWebSocketHandler(
 
     override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
         try {
-            println("Received message: ${message.payload}")
             val messageNode = objectMapper.readTree(message.payload)
-            val messageType = messageNode.get("type")?.asText() ?: "CHAT"
-            
-            when (messageType) {
+            val type = messageNode["type"].asText()
+
+            when (type) {
                 "CHAT" -> {
-                    val senderId = messageNode.get("senderId").asLong()
-                    val content = messageNode.get("content").asText()
-                    val groupId = messageNode.get("groupId")?.let { if (it.isNull) null else it.asLong() }
-                    val receiverId = messageNode.get("receiverId")?.let { if (it.isNull) null else it.asLong() }
-                    val type = MessageType.valueOf(messageNode.get("messageType")?.asText() ?: "TEXT")
-                    val fileUrl = messageNode.get("fileUrl")?.let { if (it.isNull) null else it.asText() }
-                    
-                    val savedMessage = messageService.createMessage(
-                        content = content,
-                        senderId = senderId,
-                        receiverId = receiverId,
-                        groupId = groupId,
-                        type = type,
-                        fileUrl = fileUrl
-                    )
-
-                    if (groupId != null) {
-                        // 群聊消息，发送给所有群成员
-                        val group = groupService.getGroup(groupId)
-                        group.members.forEach { member ->
-                            sessions[member.id]?.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
-                                "type" to "message",
-                                "message" to savedMessage.toDTO()
-                            ))))
-                        }
+                    // 根据消息是否包含 groupId 来区分私聊和群聊
+                    if (messageNode.has("groupId")) {
+                        handleGroupMessage(messageNode, session)
                     } else {
-                        // 私聊消息
-                        // 发送给接收者
-                        receiverId?.let { rid ->
-                            sessions[rid]?.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
-                                "type" to "message",
-                                "message" to savedMessage.toDTO()
-                            ))))
-                        }
-
-                        // 发送给发送者（确认消息已发送）
-                        sessions[senderId]?.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
-                            "type" to "message",
-                            "message" to savedMessage.toDTO()
-                        ))))
+                        handlePrivateMessage(messageNode, session)
                     }
                 }
-                "FILE" -> handleFileTransfer(messageNode)
                 "FRIEND_REQUEST" -> handleFriendRequest(messageNode, session)
+                "CREATE_GROUP" -> handleCreateGroup(messageNode, session)
                 "HANDLE_FRIEND_REQUEST" -> {
                     val requestId = messageNode.get("requestId").asLong()
                     val accept = messageNode.get("accept").asBoolean()
@@ -234,58 +198,98 @@ class ChatWebSocketHandler(
                         "friendRequest" to request
                     ))))
                 }
-                "CREATE_GROUP" -> handleCreateGroup(messageNode, session)
                 else -> {
                     session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
                         "type" to "error",
-                        "message" to "Unsupported message type: $messageType"
+                        "message" to "Unsupported message type: $type"
                     ))))
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            println("Error message payload: ${message.payload}")
-            session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
-                "type" to "error",
-                "message" to "Failed to process message: ${e.message}"
-            ))))
+            session.sendMessage(TextMessage(objectMapper.writeValueAsString(
+                WebSocketMessageDTO(
+                    type = "error",
+                    error = e.message
+                )
+            )))
         }
     }
 
-    private fun handleFileTransfer(messageNode: JsonNode) {
-        val fileTransfer = objectMapper.treeToValue(messageNode, WebSocketMessage.FileTransfer::class.java)
-        // TODO: 实现文件传输逻辑
-        val response = mapOf(
-            "type" to "file",
-            "fileId" to fileTransfer.fileId,
-            "status" to "processing"
-        )
-        val json = objectMapper.writeValueAsString(response)
-        sessions[fileTransfer.senderId]?.sendMessage(TextMessage(json))
+    private fun handleGroupMessage(messageNode: JsonNode, session: WebSocketSession) {
+        val senderId = messageNode["senderId"].asLong()
+        val groupId = messageNode["groupId"].asLong()
+        val content = messageNode["content"].asText()
+        val type = MessageType.valueOf(messageNode["messageType"]?.asText() ?: "TEXT")
+        val fileUrl = messageNode["fileUrl"]?.asText()
+
+        try {
+            val savedMessage = messageService.createMessage(
+                content = content,
+                senderId = senderId,
+                groupId = groupId,
+                type = type,
+                fileUrl = fileUrl
+            )
+
+            // 获取群组成员并发送消息
+            val group = groupService.getGroup(groupId)
+            group.members.forEach { member ->
+                sessions[member.id]?.sendMessage(TextMessage(objectMapper.writeValueAsString(
+                    WebSocketMessageDTO(
+                        type = "message",
+                        message = savedMessage.toDTO()
+                    )
+                )))
+            }
+        } catch (e: Exception) {
+            session.sendMessage(TextMessage(objectMapper.writeValueAsString(
+                WebSocketMessageDTO(
+                    type = "error",
+                    error = e.message
+                )
+            )))
+        }
     }
 
-    override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
-        val userId = session.uri?.query?.substringAfter("userId=")?.toLongOrNull()
-        if (userId != null) {
-            sessions.remove(userId)
-            userService.setUserOnline(userId, false)
-            
-            // 广播用户下线通知
-            val user = userService.getUser(userId)
-            val offlineStatus = UserStatusDTO(
-                id = user.id,
-                username = user.username,
-                nickname = user.nickname,
-                avatar = user.avatar,
-                online = false
+    private fun handlePrivateMessage(messageNode: JsonNode, session: WebSocketSession) {
+        val senderId = messageNode["senderId"].asLong()
+        val receiverId = messageNode["receiverId"].asLong()
+        val content = messageNode["content"].asText()
+        val type = MessageType.valueOf(messageNode["messageType"]?.asText() ?: "TEXT")
+        val fileUrl = messageNode["fileUrl"]?.asText()
+
+        try {
+            val savedMessage = messageService.createMessage(
+                content = content,
+                senderId = senderId,
+                receiverId = receiverId,
+                type = type,
+                fileUrl = fileUrl
             )
-            
-            val statusJson = objectMapper.writeValueAsString(mapOf(
-                "type" to "userStatus",
-                "user" to offlineStatus
-            ))
-            
-            sessions.values.forEach { it.sendMessage(TextMessage(statusJson)) }
+
+            // 发送给接收者
+            sessions[receiverId]?.sendMessage(TextMessage(objectMapper.writeValueAsString(
+                WebSocketMessageDTO(
+                    type = "message",
+                    message = savedMessage.toDTO()
+                )
+            )))
+
+            // 发送给发送者（确认消息已发送）
+            sessions[senderId]?.sendMessage(TextMessage(objectMapper.writeValueAsString(
+                WebSocketMessageDTO(
+                    type = "message",
+                    message = savedMessage.toDTO()
+                )
+            )))
+        } catch (e: Exception) {
+            session.sendMessage(TextMessage(objectMapper.writeValueAsString(
+                WebSocketMessageDTO(
+                    type = "error",
+                    error = e.message
+                )
+            )))
         }
     }
 
@@ -350,36 +354,28 @@ class ChatWebSocketHandler(
         }
     }
 
-    private fun handleGroupMessage(message: Map<String, Any>, senderId: Long) {
-        val groupId = (message["groupId"] as Number).toLong()
-        val group = groupService.getGroup(groupId)
-        
-        // 检查发送者是否是群成员
-        if (group.members.none { it.id == senderId }) {
-            return
-        }
-
-        val content = message["content"] as String
-        val type = MessageType.valueOf(message["messageType"] as String)
-        val fileUrl = message["fileUrl"] as? String
-
-        val savedMessage = messageService.createMessage(
-            content = content,
-            senderId = senderId,
-            groupId = groupId,
-            type = type,
-            fileUrl = fileUrl
-        )
-
-        // 发送消息给所有群成员
-        group.members.forEach { member ->
-            sessions[member.id]?.let { session ->
-                val response = WebSocketMessageDTO(
-                    type = "message",
-                    message = savedMessage.toDTO()
-                )
-                session.sendMessage(TextMessage(objectMapper.writeValueAsString(response)))
-            }
+    override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
+        val userId = session.uri?.query?.substringAfter("userId=")?.toLongOrNull()
+        if (userId != null) {
+            sessions.remove(userId)
+            userService.setUserOnline(userId, false)
+            
+            // 广播用户下线通知
+            val user = userService.getUser(userId)
+            val offlineStatus = UserStatusDTO(
+                id = user.id,
+                username = user.username,
+                nickname = user.nickname,
+                avatar = user.avatar,
+                online = false
+            )
+            
+            val statusJson = objectMapper.writeValueAsString(mapOf(
+                "type" to "userStatus",
+                "user" to offlineStatus
+            ))
+            
+            sessions.values.forEach { it.sendMessage(TextMessage(statusJson)) }
         }
     }
 } 

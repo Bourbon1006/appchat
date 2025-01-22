@@ -5,16 +5,17 @@
     android:orientation="vertical"
     android:padding="16dp">
 
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/groupsList"
+        android:layout_width="match_parent"
+        android:layout_height="400dp"
+        android:layout_marginTop="8dp" />
+
     <Button
         android:id="@+id/createGroupButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="创建新群聊" />
-
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/groupList"
-        android:layout_width="match_parent"
-        android:layout_height="400dp"
-        android:layout_marginTop="8dp" />
+        android:layout_marginTop="8dp"
+        android:text="创建群组" />
 
 </LinearLayout> 

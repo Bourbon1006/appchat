@@ -6,16 +6,16 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import android.content.Context
 import com.example.appchat.R
+import com.google.gson.GsonBuilder
+import java.time.LocalDateTime
 
 object ApiClient {
     private lateinit var retrofit: Retrofit
 
     fun init(context: Context) {
-        val baseUrl = context.getString(
-            R.string.server_url_format,
-            context.getString(R.string.server_ip),
-            context.getString(R.string.server_port)
-        )
+        val gson = GsonBuilder()
+            .registerTypeAdapter(LocalDateTime::class.java, LocalDateTimeAdapter())
+            .create()
 
         val loggingInterceptor = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
@@ -26,9 +26,12 @@ object ApiClient {
             .build()
 
         retrofit = Retrofit.Builder()
-            .baseUrl(baseUrl)
+            .baseUrl(context.getString(R.string.server_url_format).format(
+                context.getString(R.string.server_ip),
+                context.getString(R.string.server_port)
+            ))
+            .addConverterFactory(GsonConverterFactory.create(gson))
             .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
             .build()
     }
 

@@ -10,19 +10,21 @@ class Message(
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     var id: Long = 0,
 
+    @Column(nullable = false)
     var content: String,
 
+    @Column(nullable = false)
     var timestamp: LocalDateTime = LocalDateTime.now(),
 
-    @ManyToOne
-    @JoinColumn(name = "sender_id")
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "sender_id", nullable = false)
     var sender: User,
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "receiver_id")
     var receiver: User? = null,
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "group_id")
     var group: Group? = null,
 

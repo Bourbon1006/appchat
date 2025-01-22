@@ -69,6 +69,28 @@ interface ApiService {
     @PUT("groups/{groupId}")
     fun updateGroup(@Path("groupId") groupId: Long, @Body group: Group): Call<Group>
 
-    @GET("groups/{groupId}/messages")
+    @GET("api/messages/group/{groupId}")
     fun getGroupMessages(@Path("groupId") groupId: Long): Call<List<ChatMessage>>
+
+    @GET("api/messages/private")
+    fun getPrivateMessages(
+        @Query("user1Id") user1Id: Long,
+        @Query("user2Id") user2Id: Long
+    ): Call<List<ChatMessage>>
+
+    @GET("api/messages/user/{userId}")
+    fun getUserMessages(@Path("userId") userId: Long): Call<List<ChatMessage>>
+
+    @GET("api/messages/search")
+    fun searchMessages(
+        @Query("userId") userId: Long,
+        @Query("keyword") keyword: String
+    ): Call<List<ChatMessage>>
+
+    @GET("api/messages/date-range")
+    fun getMessagesByDateRange(
+        @Query("userId") userId: Long,
+        @Query("startDate") startDate: String,
+        @Query("endDate") endDate: String
+    ): Call<List<ChatMessage>>
 } 

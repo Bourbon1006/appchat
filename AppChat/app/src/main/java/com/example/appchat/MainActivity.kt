@@ -243,114 +243,45 @@ class MainActivity : AppCompatActivity() {
     private fun showContactsDialog() {
         val dialog = AlertDialog.Builder(this)
             .setTitle("联系人")
+            .setView(R.layout.dialog_contacts)
             .create()
 
-        val view = layoutInflater.inflate(R.layout.dialog_contacts, null)
-        val contactsList = view.findViewById<RecyclerView>(R.id.contactsList)
-        val progressBar = view.findViewById<ProgressBar>(R.id.progressBar)
-        val searchInput = view.findViewById<EditText>(R.id.searchInput)
-        val searchButton = view.findViewById<Button>(R.id.searchButton)
+        dialog.show()
 
-        // 设置联系人适配器
-        var adapter = ContactAdapter { user ->
-            currentChatUserId = user.id
-            title = "与 ${user.username} 聊天中"
+        val contactsList = dialog.findViewById<RecyclerView>(R.id.contactsList)
+        val adapter = ContactAdapter { contact ->
+            println("Contact clicked: ${contact.username}")
+            // 设置当前聊天对象
+            currentChatUserId = contact.id
+            currentChatGroupId = null
+            // 更新标题
+            title = "与 ${contact.username} 聊天中"
             messageAdapter.clearMessages()
+            // 加载聊天记录
+            loadChatHistory(contactId = contact.id)
             dialog.dismiss()
         }
-        contactAdapter = adapter
 
-        // 设置搜索结果适配器
-        val searchAdapter = SearchUserAdapter(UserPreferences.getUserId(this)) { user ->
-            webSocket.sendDebug(mapOf(
-                "type" to "FRIEND_REQUEST",
-                "senderId" to UserPreferences.getUserId(this),
-                "receiverId" to user.id
-            ))
-            Toast.makeText(this, "已发送好友请求", Toast.LENGTH_SHORT).show()
-        }
-
-        contactsList.apply {
+        contactsList?.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             this.adapter = adapter
         }
 
         // 加载联系人列表
-        loadContacts(adapter, progressBar)
-
-        // 设置搜索功能
-        fun performSearch(keyword: String) {
-            if (keyword.isNotEmpty()) {
-                progressBar.visibility = View.VISIBLE
-                contactsList.adapter = searchAdapter
-                
-                ApiClient.service.searchUsers(keyword)
-                    .enqueue(object : Callback<List<User>> {
-                        override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
-                            progressBar.visibility = View.GONE
-                            if (response.isSuccessful) {
-                                response.body()?.let { users ->
-                                    searchAdapter.updateUsers(users)
-                                }
-                            } else {
-                                Toast.makeText(this@MainActivity, "搜索失败", Toast.LENGTH_SHORT).show()
-                                contactsList.adapter = adapter
-                            }
-                        }
-
-                        override fun onFailure(call: Call<List<User>>, t: Throwable) {
-                            progressBar.visibility = View.GONE
-                            Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
-                            contactsList.adapter = adapter
-                        }
-                    })
-            } else {
-                contactsList.adapter = adapter
-            }
-        }
-
-        // 搜索按钮点击事件
-        searchButton.setOnClickListener {
-            performSearch(searchInput.text.toString())
-        }
-
-        // 搜索框回车事件
-        searchInput.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
-                performSearch(searchInput.text.toString())
-                true
-            } else {
-                false
-            }
-        }
-
-        dialog.setView(view)
-        dialog.show()
-    }
-
-    private fun loadContacts(adapter: ContactAdapter, progressBar: ProgressBar) {
-        progressBar.visibility = View.VISIBLE
-        ApiClient.service.getUserContacts(UserPreferences.getUserId(this))
-            .enqueue(object : Callback<List<User>> {
-                override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
-                    progressBar.visibility = View.GONE
-                    if (response.isSuccessful) {
-                        response.body()?.let { contacts ->
-                            adapter.updateContacts(contacts)
-                            if (contacts.isEmpty()) {
-                                Toast.makeText(this@MainActivity, "暂无联系人", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    } else {
-                        Toast.makeText(this@MainActivity, "获取联系人列表失败", Toast.LENGTH_SHORT).show()
+        val userId = UserPreferences.getUserId(this)
+        ApiClient.service.getUserContacts(userId).enqueue(object : Callback<List<User>> {
+            override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
+                if (response.isSuccessful) {
+                    response.body()?.let { contacts ->
+                        adapter.updateContacts(contacts)
                     }
                 }
+            }
 
-                override fun onFailure(call: Call<List<User>>, t: Throwable) {
-                    progressBar.visibility = View.GONE
-                    Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
-                }
-            })
+            override fun onFailure(call: Call<List<User>>, t: Throwable) {
+                Toast.makeText(this@MainActivity, "加载联系人失败", Toast.LENGTH_SHORT).show()
+            }
+        })
     }
 
     private fun showSearchDialog() {
@@ -517,47 +448,44 @@ class MainActivity : AppCompatActivity() {
 
     private fun showGroupListDialog() {
         val dialog = AlertDialog.Builder(this)
-            .setTitle("群聊列表")
+            .setTitle("群组")
+            .setView(R.layout.dialog_group_list)
             .create()
 
-        val view = layoutInflater.inflate(R.layout.dialog_group_list, null)
-        val groupList = view.findViewById<RecyclerView>(R.id.groupList)
-        val createGroupButton = view.findViewById<Button>(R.id.createGroupButton)
+        dialog.show()
 
-        val groupAdapter = GroupAdapter { selectedGroup: Group ->
-            currentChatGroupId = selectedGroup.id
-            title = selectedGroup.name
-            loadGroupMessages(selectedGroup.id)
+        val groupsList = dialog.findViewById<RecyclerView>(R.id.groupsList)
+        val adapter = GroupAdapter { group ->
+            // 设置当前聊天对象
+            currentChatGroupId = group.id
+            currentChatUserId = null
+            // 更新标题
+            title = group.name
+            // 加载聊天记录
+            loadChatHistory(groupId = group.id)
             dialog.dismiss()
         }
 
-        groupList.apply {
+        groupsList?.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
-            adapter = groupAdapter
-        }
-
-        createGroupButton.setOnClickListener {
-            showCreateGroupDialog()
+            this.adapter = adapter
         }
 
         // 加载群组列表
-        ApiClient.service.getUserGroups(UserPreferences.getUserId(this))
-            .enqueue(object : Callback<List<Group>> {
-                override fun onResponse(call: Call<List<Group>>, response: Response<List<Group>>) {
-                    if (response.isSuccessful) {
-                        response.body()?.let { groups ->
-                            groupAdapter.updateGroups(groups)
-                        }
+        val userId = UserPreferences.getUserId(this)
+        ApiClient.service.getUserGroups(userId).enqueue(object : Callback<List<Group>> {
+            override fun onResponse(call: Call<List<Group>>, response: Response<List<Group>>) {
+                if (response.isSuccessful) {
+                    response.body()?.let { groups ->
+                        adapter.updateGroups(groups)
                     }
                 }
+            }
 
-                override fun onFailure(call: Call<List<Group>>, t: Throwable) {
-                    Toast.makeText(this@MainActivity, "加载群组失败", Toast.LENGTH_SHORT).show()
-                }
-            })
-
-        dialog.setView(view)
-        dialog.show()
+            override fun onFailure(call: Call<List<Group>>, t: Throwable) {
+                Toast.makeText(this@MainActivity, "加载群组失败", Toast.LENGTH_SHORT).show()
+            }
+        })
     }
 
     private fun sendMessage(content: String) {
@@ -691,65 +619,59 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun loadGroupMessages(groupId: Long) {
-        ApiClient.service.getGroupMessages(groupId)
-            .enqueue(object : Callback<List<ChatMessage>> {
-                override fun onResponse(call: Call<List<ChatMessage>>, response: Response<List<ChatMessage>>) {
-                    if (response.isSuccessful) {
-                        response.body()?.let { messages ->
-                            messageAdapter.clearMessages()
-                            messages.forEach { message ->
-                                messageAdapter.addMessage(message)
+    private fun loadChatHistory(contactId: Long? = null, groupId: Long? = null) {
+        println("Loading chat history - contactId: $contactId, groupId: $groupId")
+        val currentUserId = UserPreferences.getUserId(this)
+        
+        if (contactId != null) {
+            // 加载私聊消息
+            println("Loading private messages between $currentUserId and $contactId")
+            ApiClient.service.getPrivateMessages(currentUserId, contactId)
+                .enqueue(object : Callback<List<ChatMessage>> {
+                    override fun onResponse(call: Call<List<ChatMessage>>, response: Response<List<ChatMessage>>) {
+                        println("Private messages response: ${response.code()}")
+                        if (response.isSuccessful) {
+                            response.body()?.let { messages ->
+                                println("Received ${messages.size} messages")
+                                messageAdapter.clearMessages()
+                                messages.forEach { message ->
+                                    messageAdapter.addMessage(message)
+                                }
+                                messageList.scrollToPosition(messageAdapter.itemCount - 1)
                             }
-                            messageList.scrollToPosition(messageAdapter.itemCount - 1)
+                        } else {
+                            Toast.makeText(this@MainActivity, "加载消息失败: ${response.code()}", Toast.LENGTH_SHORT).show()
                         }
                     }
-                }
 
-                override fun onFailure(call: Call<List<ChatMessage>>, t: Throwable) {
-                    Toast.makeText(this@MainActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
-                }
-            })
-    }
-
-    private fun handleCreateGroup(name: String, memberIds: List<Long>) {
-        val request = CreateGroupRequest(
-            name = name,
-            creatorId = UserPreferences.getUserId(this),
-            memberIds = memberIds
-        )
-
-        ApiClient.service.createGroup(request).enqueue(object : Callback<Group> {
-            override fun onResponse(call: Call<Group>, response: Response<Group>) {
-                if (response.isSuccessful) {
-                    Toast.makeText(this@MainActivity, "群组创建成功", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(this@MainActivity, "创建群组失败: ${response.code()}", Toast.LENGTH_SHORT).show()
-                }
-            }
-
-            override fun onFailure(call: Call<Group>, t: Throwable) {
-                Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
-            }
-        })
-    }
-
-    private fun loadGroups() {
-        val userId = UserPreferences.getUserId(this)
-        ApiClient.service.getUserGroups(userId).enqueue(object : Callback<List<Group>> {
-            override fun onResponse(call: Call<List<Group>>, response: Response<List<Group>>) {
-                if (response.isSuccessful) {
-                    response.body()?.let { groups ->
-                        // 更新群组列表
-                        showGroupListDialog()
+                    override fun onFailure(call: Call<List<ChatMessage>>, t: Throwable) {
+                        println("Failed to load private messages: ${t.message}")
+                        Toast.makeText(this@MainActivity, "加载消息失败: ${t.message}", Toast.LENGTH_SHORT).show()
                     }
-                }
-            }
+                })
+        } else if (groupId != null) {
+            // 加载群聊消息
+            ApiClient.service.getGroupMessages(groupId)
+                .enqueue(object : Callback<List<ChatMessage>> {
+                    override fun onResponse(call: Call<List<ChatMessage>>, response: Response<List<ChatMessage>>) {
+                        if (response.isSuccessful) {
+                            response.body()?.let { messages ->
+                                messageAdapter.clearMessages()
+                                messages.forEach { message ->
+                                    messageAdapter.addMessage(message)
+                                }
+                                messageList.scrollToPosition(messageAdapter.itemCount - 1)
+                            }
+                        } else {
+                            Toast.makeText(this@MainActivity, "加载消息失败: ${response.code()}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
 
-            override fun onFailure(call: Call<List<Group>>, t: Throwable) {
-                Toast.makeText(this@MainActivity, "加载群组失败", Toast.LENGTH_SHORT).show()
-            }
-        })
+                    override fun onFailure(call: Call<List<ChatMessage>>, t: Throwable) {
+                        Toast.makeText(this@MainActivity, "加载消息失败: ${t.message}", Toast.LENGTH_SHORT).show()
+                    }
+                })
+        }
     }
 
     override fun onDestroy() {
