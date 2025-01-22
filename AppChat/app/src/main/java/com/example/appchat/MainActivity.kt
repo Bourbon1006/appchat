@@ -64,6 +64,9 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import android.os.Build
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.ActivityResultLauncher
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import com.example.appchat.adapter.SearchResultAdapter
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webSocket: WebSocket
@@ -90,6 +93,7 @@ class MainActivity : AppCompatActivity() {
     private var currentChatGroupId: Long? = null
     private val FILE_PICK_REQUEST = 1
     private val STORAGE_PERMISSION_REQUEST = 2
+    private val apiService = ApiClient.apiService
 
     private val filePickerLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -144,18 +148,61 @@ class MainActivity : AppCompatActivity() {
         
         setupViews()
         initWebSocket()
+
+        messageAdapter = MessageAdapter(
+            context = this,
+            currentUserId = UserPreferences.getUserId(this),
+            currentChatType = "group",  // 默认为群聊
+            chatPartnerId = -1L,  // 默认值，表示没有特定聊天对象
+            onMessageDelete = { messageId ->
+                lifecycleScope.launch {
+                    try {
+                        println("🗑️ Starting message deletion process: $messageId")
+                        
+                        // 先从本地删除
+                        messageAdapter.removeMessage(messageId)
+                        println("✅ Local message deletion completed")
+                        
+                        // 然后从服务器删除
+                        val response = apiService.deleteMessage(messageId, UserPreferences.getUserId(this@MainActivity))
+                        if (response.isSuccessful) {
+                            println("✅ Server message deletion successful")
+                            Toast.makeText(this@MainActivity, "消息已删除", Toast.LENGTH_SHORT).show()
+                        } else {
+                            println("⚠️ Server deletion failed but local deletion succeeded: ${response.code()}")
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        println("❌ Error in deletion process: ${e.message}")
+                    }
+                }
+            }
+        )
+
+        messageList.apply {
+            layoutManager = LinearLayoutManager(this@MainActivity).apply {
+                stackFromEnd = true  // 从底部开始堆叠
+                reverseLayout = false  // 不要反转布局
+            }
+            adapter = messageAdapter
+            
+            adapter?.registerAdapterDataObserver(object : RecyclerView.AdapterDataObserver() {
+                override fun onItemRangeInserted(positionStart: Int, itemCount: Int) {
+                    super.onItemRangeInserted(positionStart, itemCount)
+                    val layoutManager = layoutManager as LinearLayoutManager
+                    val lastVisiblePosition = layoutManager.findLastCompletelyVisibleItemPosition()
+                    if (lastVisiblePosition == -1 || positionStart >= messageAdapter.itemCount - 1 && lastVisiblePosition == positionStart - 1) {
+                        scrollToPosition(messageAdapter.itemCount - 1)
+                    }
+                }
+            })
+        }
     }
 
     private fun setupViews() {
         messageInput = findViewById(R.id.messageInput)
         sendButton = findViewById(R.id.sendButton)
         messageList = findViewById(R.id.messageList)
-
-        messageAdapter = MessageAdapter(UserPreferences.getUserId(this))
-        messageList.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
-            adapter = messageAdapter
-        }
 
         sendButton.setOnClickListener {
             val message = messageInput.text.toString()
@@ -200,8 +247,24 @@ class MainActivity : AppCompatActivity() {
                             }
                             "message" -> {
                                 wsMessage.message?.let { message ->
-                                    messageAdapter.addMessage(message)
-                                    messageList.scrollToPosition(messageAdapter.itemCount - 1)
+                                    // 检查消息是否属于当前聊天
+                                    val shouldAdd = when {
+                                        currentChatUserId != null -> {
+                                            message.senderId == currentChatUserId || message.receiverId == currentChatUserId
+                                        }
+                                        currentChatGroupId != null -> {
+                                            message.groupId == currentChatGroupId
+                                        }
+                                        else -> false
+                                    }
+                                    
+                                    if (shouldAdd) {
+                                        println("✅ Adding new message to local database: ${message.id}")
+                                        messageAdapter.addMessage(message)
+                                        messageList.scrollToPosition(messageAdapter.itemCount - 1)
+                                    } else {
+                                        println("⚠️ Message not for current chat, skipping")
+                                    }
                                 }
                             }
                             "users" -> {
@@ -262,7 +325,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        println("Error parsing message: $text")
+                        println("❌ Error processing WebSocket message: ${e.message}")
                     }
                 }
             }
@@ -301,7 +364,37 @@ class MainActivity : AppCompatActivity() {
             currentChatGroupId = null
             // 更新标题
             title = "与 ${contact.username} 聊天中"
-            messageAdapter.clearMessages()
+            // 创建新的 MessageAdapter 实例
+            messageAdapter = MessageAdapter(
+                context = this,
+                currentUserId = UserPreferences.getUserId(this),
+                currentChatType = "private",
+                chatPartnerId = contact.id,
+                onMessageDelete = { messageId ->
+                    lifecycleScope.launch {
+                        try {
+                            println("🗑️ Starting message deletion process: $messageId")
+                            
+                            // 先从本地删除
+                            messageAdapter.removeMessage(messageId)
+                            println("✅ Local message deletion completed")
+                            
+                            // 然后从服务器删除
+                            val response = apiService.deleteMessage(messageId, UserPreferences.getUserId(this@MainActivity))
+                            if (response.isSuccessful) {
+                                println("✅ Server message deletion successful")
+                                Toast.makeText(this@MainActivity, "消息已删除", Toast.LENGTH_SHORT).show()
+                            } else {
+                                println("⚠️ Server deletion failed but local deletion succeeded: ${response.code()}")
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            println("❌ Error in deletion process: ${e.message}")
+                        }
+                    }
+                }
+            )
+            messageList.adapter = messageAdapter
             // 加载聊天记录
             loadChatHistory(contactId = contact.id)
             dialog.dismiss()
@@ -314,7 +407,7 @@ class MainActivity : AppCompatActivity() {
 
         // 加载联系人列表
         val userId = UserPreferences.getUserId(this)
-        ApiClient.service.getUserContacts(userId).enqueue(object : Callback<List<User>> {
+        ApiClient.apiService.getUserContacts(userId).enqueue(object : Callback<List<User>> {
             override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
                 if (response.isSuccessful) {
                     response.body()?.let { contacts ->
@@ -362,7 +455,7 @@ class MainActivity : AppCompatActivity() {
                 println("Performing search with keyword: $keyword")
                 progressBar.visibility = View.VISIBLE
                 adapter.updateUsers(emptyList()) // 清空之前的结果
-                ApiClient.service.searchUsers(keyword)
+                ApiClient.apiService.searchUsers(keyword)
                     .enqueue(object : Callback<List<User>> {
                         override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
                             println("Search API response code: ${response.code()}")
@@ -463,7 +556,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // 加载联系人列表
-        ApiClient.service.getUserContacts(UserPreferences.getUserId(this))
+        ApiClient.apiService.getUserContacts(UserPreferences.getUserId(this))
             .enqueue(object : Callback<List<User>> {
                 override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
                     if (response.isSuccessful) {
@@ -497,7 +590,7 @@ class MainActivity : AppCompatActivity() {
                 memberIds = selectedContacts.map { it.id }
             )
 
-            ApiClient.service.createGroup(request)
+            ApiClient.apiService.createGroup(request)
                 .enqueue(object : Callback<Group> {
                     override fun onResponse(call: Call<Group>, response: Response<Group>) {
                         if (response.isSuccessful) {
@@ -527,12 +620,50 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
 
         val groupsList = dialog.findViewById<RecyclerView>(R.id.groupsList)
+        val createGroupButton = dialog.findViewById<Button>(R.id.createGroupButton)
+
+        createGroupButton?.setOnClickListener {
+            showCreateGroupDialog()
+            dialog.dismiss()
+        }
+
         val adapter = GroupAdapter { group ->
             // 设置当前聊天对象
             currentChatGroupId = group.id
             currentChatUserId = null
             // 更新标题
             title = group.name
+            // 创建新的 MessageAdapter 实例
+            messageAdapter = MessageAdapter(
+                context = this,
+                currentUserId = UserPreferences.getUserId(this),
+                currentChatType = "group",
+                chatPartnerId = group.id,
+                onMessageDelete = { messageId ->
+                    lifecycleScope.launch {
+                        try {
+                            println("🗑️ Starting message deletion process: $messageId")
+                            
+                            // 先从本地删除
+                            messageAdapter.removeMessage(messageId)
+                            println("✅ Local message deletion completed")
+                            
+                            // 然后从服务器删除
+                            val response = apiService.deleteMessage(messageId, UserPreferences.getUserId(this@MainActivity))
+                            if (response.isSuccessful) {
+                                println("✅ Server message deletion successful")
+                                Toast.makeText(this@MainActivity, "消息已删除", Toast.LENGTH_SHORT).show()
+                            } else {
+                                println("⚠️ Server deletion failed but local deletion succeeded: ${response.code()}")
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            println("❌ Error in deletion process: ${e.message}")
+                        }
+                    }
+                }
+            )
+            messageList.adapter = messageAdapter
             // 加载聊天记录
             loadChatHistory(groupId = group.id)
             dialog.dismiss()
@@ -545,7 +676,7 @@ class MainActivity : AppCompatActivity() {
 
         // 加载群组列表
         val userId = UserPreferences.getUserId(this)
-        ApiClient.service.getUserGroups(userId).enqueue(object : Callback<List<Group>> {
+        ApiClient.apiService.getUserGroups(userId).enqueue(object : Callback<List<Group>> {
             override fun onResponse(call: Call<List<Group>>, response: Response<List<Group>>) {
                 if (response.isSuccessful) {
                     response.body()?.let { groups ->
@@ -618,7 +749,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle("移除成员")
             .setMessage("确定要将 ${user.username} 移出群聊吗？")
             .setPositiveButton("确定") { _, _ ->
-                ApiClient.service.removeGroupMember(groupId, user.id)
+                ApiClient.apiService.removeGroupMember(groupId, user.id)
                     .enqueue(object : Callback<Group> {
                         override fun onResponse(call: Call<Group>, response: Response<Group>) {
                             if (response.isSuccessful) {
@@ -646,7 +777,7 @@ class MainActivity : AppCompatActivity() {
         val contactsList = view.findViewById<RecyclerView>(R.id.contactsList)
 
         // 过滤掉已经在群里的联系人
-        ApiClient.service.getUserContacts(UserPreferences.getUserId(this))
+        ApiClient.apiService.getUserContacts(UserPreferences.getUserId(this))
             .enqueue(object : Callback<List<User>> {
                 override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
                     if (response.isSuccessful) {
@@ -656,7 +787,7 @@ class MainActivity : AppCompatActivity() {
                             }
                             
                             val adapter = ContactSelectionAdapter(availableContacts) { selectedUser: User ->
-                                ApiClient.service.addGroupMember(group.id, selectedUser.id)
+                                ApiClient.apiService.addGroupMember(group.id, selectedUser.id)
                                     .enqueue(object : Callback<Group> {
                                         override fun onResponse(call: Call<Group>, response: Response<Group>) {
                                             if (response.isSuccessful) {
@@ -693,54 +824,55 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadChatHistory(contactId: Long? = null, groupId: Long? = null) {
         println("Loading chat history - contactId: $contactId, groupId: $groupId")
+        
+        // 先从本地加载消息
+        val localMessages = messageAdapter.loadLocalMessages()
+        if (localMessages.isNotEmpty()) {
+            println("✅ Loaded ${localMessages.size} messages from local database")
+        }
+
+        // 然后从服务器获取最新消息
         val currentUserId = UserPreferences.getUserId(this)
         
         if (contactId != null) {
             // 加载私聊消息
             println("Loading private messages between $currentUserId and $contactId")
-            ApiClient.service.getPrivateMessages(currentUserId, contactId)
+            ApiClient.apiService.getPrivateMessages(currentUserId, contactId)
                 .enqueue(object : Callback<List<ChatMessage>> {
                     override fun onResponse(call: Call<List<ChatMessage>>, response: Response<List<ChatMessage>>) {
-                        println("Private messages response: ${response.code()}")
                         if (response.isSuccessful) {
                             response.body()?.let { messages ->
-                                println("Received ${messages.size} messages")
-                                messageAdapter.clearMessages()
-                                messages.forEach { message ->
-                                    messageAdapter.addMessage(message)
-                                }
-                                messageList.scrollToPosition(messageAdapter.itemCount - 1)
+                                println("✅ Received ${messages.size} messages from server")
+                                // 更新本地消息
+                                messageAdapter.updateMessages(messages)
                             }
                         } else {
-                            Toast.makeText(this@MainActivity, "加载消息失败: ${response.code()}", Toast.LENGTH_SHORT).show()
+                            println("❌ Failed to load messages from server: ${response.code()}")
                         }
                     }
 
                     override fun onFailure(call: Call<List<ChatMessage>>, t: Throwable) {
-                        println("Failed to load private messages: ${t.message}")
-                        Toast.makeText(this@MainActivity, "加载消息失败: ${t.message}", Toast.LENGTH_SHORT).show()
+                        println("❌ Network error: ${t.message}")
                     }
                 })
         } else if (groupId != null) {
             // 加载群聊消息
-            ApiClient.service.getGroupMessages(groupId)
+            ApiClient.apiService.getGroupMessages(groupId)
                 .enqueue(object : Callback<List<ChatMessage>> {
                     override fun onResponse(call: Call<List<ChatMessage>>, response: Response<List<ChatMessage>>) {
                         if (response.isSuccessful) {
                             response.body()?.let { messages ->
-                                messageAdapter.clearMessages()
-                                messages.forEach { message ->
-                                    messageAdapter.addMessage(message)
-                                }
-                                messageList.scrollToPosition(messageAdapter.itemCount - 1)
+                                println("✅ Received ${messages.size} messages from server")
+                                // 更新本地消息
+                                messageAdapter.updateMessages(messages)
                             }
                         } else {
-                            Toast.makeText(this@MainActivity, "加载消息失败: ${response.code()}", Toast.LENGTH_SHORT).show()
+                            println("❌ Failed to load messages from server: ${response.code()}")
                         }
                     }
 
                     override fun onFailure(call: Call<List<ChatMessage>>, t: Throwable) {
-                        Toast.makeText(this@MainActivity, "加载消息失败: ${t.message}", Toast.LENGTH_SHORT).show()
+                        println("❌ Network error: ${t.message}")
                     }
                 })
         }
@@ -759,8 +891,11 @@ class MainActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             R.id.action_search -> {
-                println("Search menu item clicked")
                 showSearchDialog()
+                true
+            }
+            R.id.action_search_messages -> {
+                showSearchMessagesDialog()
                 true
             }
             else -> super.onOptionsItemSelected(item)
@@ -831,7 +966,7 @@ class MainActivity : AppCompatActivity() {
             
             val body = MultipartBody.Part.createFormData("file", filename, requestFile)
             
-            ApiClient.service.uploadFile(body).enqueue(object : Callback<FileDTO> {
+            ApiClient.apiService.uploadFile(body).enqueue(object : Callback<FileDTO> {
                 override fun onResponse(call: Call<FileDTO>, response: Response<FileDTO>) {
                     if (response.isSuccessful) {
                         response.body()?.let { fileDTO ->
@@ -904,6 +1039,48 @@ class MainActivity : AppCompatActivity() {
             e.printStackTrace()
             null
         }
+    }
+
+    private fun showSearchMessagesDialog() {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("搜索聊天记录")
+            .create()
+
+        val view = layoutInflater.inflate(R.layout.dialog_search_messages, null)
+        val searchInput = view.findViewById<EditText>(R.id.searchInput)
+        val searchResultsList = view.findViewById<RecyclerView>(R.id.searchResultsList)
+
+        searchResultsList.layoutManager = LinearLayoutManager(this)
+        
+        // 处理搜索动作
+        searchInput.setOnEditorActionListener { v, actionId, event ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                val query = v.text.toString()
+                if (query.isNotEmpty()) {
+                    searchMessages(query, searchResultsList) { position ->
+                        // 点击搜索结果时滚动到对应位置
+                        messageList.smoothScrollToPosition(position)
+                        dialog.dismiss()
+                    }
+                }
+                true
+            } else {
+                false
+            }
+        }
+
+        dialog.setView(view)
+        dialog.show()
+    }
+
+    private fun searchMessages(query: String, resultsList: RecyclerView, onItemClick: (Int) -> Unit) {
+        // 在当前消息列表中搜索
+        val searchResults = messageAdapter.searchMessages(query)
+        
+        // 创建搜索结果适配器
+        val adapter = SearchResultAdapter(searchResults, onItemClick)
+        
+        resultsList.adapter = adapter
     }
 
     companion object {

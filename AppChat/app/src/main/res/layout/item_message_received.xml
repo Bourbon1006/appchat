@@ -3,51 +3,63 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:padding="8dp"
-    android:gravity="start">
+    android:padding="8dp">
 
-    <TextView
-        android:id="@+id/nameText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textSize="12sp"
-        android:textColor="@android:color/darker_gray"
-        android:layout_marginStart="8dp"/>
-
-    <LinearLayout
-        android:id="@+id/fileContainer"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:background="@drawable/message_received_background"
-        android:padding="12dp"
-        android:clickable="true"
-        android:focusable="true"
-        android:foreground="?attr/selectableItemBackground">
-
-        <ImageView
-            android:id="@+id/fileIcon"
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:src="@drawable/ic_file"
-            android:visibility="gone"
-            android:layout_marginEnd="8dp"/>
-
-        <TextView
-            android:id="@+id/messageText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:maxWidth="240dp"
-            android:textColor="@android:color/black"
-            android:textSize="16sp"/>
-    </LinearLayout>
-
+    <!-- 时间消息布局 -->
     <TextView
         android:id="@+id/timeText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:textSize="12sp"
+        android:layout_gravity="center"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"
         android:textColor="@android:color/darker_gray"
-        android:layout_marginTop="4dp"/>
+        android:textSize="12sp"
+        android:visibility="gone" />
 
+    <!-- 消息内容布局 -->
+    <LinearLayout
+        android:id="@+id/messageContainer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="start"
+        android:background="@drawable/bg_message_received"
+        android:orientation="vertical"
+        android:padding="8dp">
+
+        <!-- 发送者名称 -->
+        <TextView
+            android:id="@+id/senderName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@android:color/darker_gray"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+        <!-- 消息文本 -->
+        <TextView
+            android:id="@+id/messageText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#333333"
+            android:textSize="16sp"
+            android:maxWidth="280dp"
+            android:minWidth="50dp" />
+
+        <!-- 文件容器 -->
+        <LinearLayout
+            android:id="@+id/fileContainer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/fileIcon"
+                android:layout_width="200dp"
+                android:layout_height="200dp"
+                android:scaleType="centerCrop"
+                android:visibility="gone" />
+        </LinearLayout>
+    </LinearLayout>
 </LinearLayout> 

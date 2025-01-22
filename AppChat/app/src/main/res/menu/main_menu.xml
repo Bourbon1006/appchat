@@ -21,4 +21,9 @@
         android:icon="@drawable/ic_search"
         android:title="搜索用户"
         app:showAsAction="ifRoom"/>
+    <item
+        android:id="@+id/action_search_messages"
+        android:icon="@drawable/ic_search_message"
+        android:title="搜索聊天记录"
+        app:showAsAction="ifRoom"/>
 </menu> 

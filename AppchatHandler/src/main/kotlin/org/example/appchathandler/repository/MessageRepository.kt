@@ -11,6 +11,11 @@ import java.time.LocalDateTime
 
 @Repository
 interface MessageRepository : JpaRepository<Message, Long> {
+    @Query("""
+        SELECT m FROM Message m 
+        WHERE m.group = :group
+        ORDER BY m.timestamp ASC
+    """)
     fun findByGroupOrderByTimestampAsc(group: Group): List<Message>
 
     @Query("""
@@ -34,7 +39,7 @@ interface MessageRepository : JpaRepository<Message, Long> {
         OR (m.group IS NOT NULL AND :user MEMBER OF m.group.members)
         ORDER BY m.timestamp DESC
     """)
-    fun findByUserMessages(user: User): List<Message>
+    fun findByUserMessages(@Param("user") user: User): List<Message>
 
     @Query("""
         SELECT m FROM Message m 
@@ -83,5 +88,30 @@ interface MessageRepository : JpaRepository<Message, Long> {
         @Param("group") group: Group,
         @Param("startTime") startTime: LocalDateTime,
         @Param("endTime") endTime: LocalDateTime
+    ): List<Message>
+
+    @Query("""
+        SELECT m FROM Message m 
+        WHERE :userId NOT IN (SELECT du FROM m.deletedForUsers du)
+        AND (
+            (m.sender.id = :userId AND m.receiver.id = :otherId)
+            OR (m.sender.id = :otherId AND m.receiver.id = :userId)
+        )
+        ORDER BY m.timestamp ASC
+    """)
+    fun findMessagesBetweenUsers(
+        @Param("userId") userId: Long,
+        @Param("otherId") otherId: Long
+    ): List<Message>
+
+    @Query("""
+        SELECT m FROM Message m 
+        WHERE m.group.id = :groupId
+        AND :userId NOT IN (SELECT du FROM m.deletedForUsers du)
+        ORDER BY m.timestamp DESC
+    """)
+    fun findGroupMessages(
+        @Param("groupId") groupId: Long,
+        @Param("userId") userId: Long
     ): List<Message>
 } 

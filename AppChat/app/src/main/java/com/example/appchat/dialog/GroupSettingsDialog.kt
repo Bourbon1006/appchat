@@ -1,6 +1,7 @@
 package com.example.appchat.dialog
 
 import android.app.AlertDialog
+import android.app.Dialog
 import android.content.Context
 import android.view.LayoutInflater
 import android.view.View
@@ -24,8 +25,8 @@ class GroupSettingsDialog(
     private val group: Group,
     private val currentUserId: Long,
     private val onGroupUpdated: (Group) -> Unit
-) {
-    fun show() {
+) : Dialog(context) {
+    override fun show() {
         val dialog = AlertDialog.Builder(context)
             .setTitle("群组设置")
             .create()
@@ -52,7 +53,7 @@ class GroupSettingsDialog(
             isCreator = isCreator
         ) { user ->
             if (isCreator) {
-                showRemoveMemberConfirmDialog(group.id, user)
+                showRemoveMemberConfirmDialog(user)
             }
         }
 
@@ -62,7 +63,7 @@ class GroupSettingsDialog(
         }
 
         addMemberButton.setOnClickListener {
-            showAddMemberDialog(group)
+            showAddMemberDialog()
         }
 
         saveButton.setOnClickListener {
@@ -71,7 +72,7 @@ class GroupSettingsDialog(
                     name = groupNameInput.text.toString(),
                     announcement = groupAnnouncementInput.text.toString()
                 )
-                ApiClient.service.updateGroup(group.id, updatedGroup)
+                ApiClient.apiService.updateGroup(group.id, updatedGroup)
                     .enqueue(object : Callback<Group> {
                         override fun onResponse(call: Call<Group>, response: Response<Group>) {
                             if (response.isSuccessful) {
@@ -93,12 +94,12 @@ class GroupSettingsDialog(
         dialog.show()
     }
 
-    private fun showRemoveMemberConfirmDialog(groupId: Long, user: User) {
+    private fun showRemoveMemberConfirmDialog(user: User) {
         AlertDialog.Builder(context)
             .setTitle("移除成员")
             .setMessage("确定要将 ${user.username} 移出群聊吗？")
             .setPositiveButton("确定") { _, _ ->
-                ApiClient.service.removeGroupMember(groupId, user.id)
+                ApiClient.apiService.removeGroupMember(group.id, user.id)
                     .enqueue(object : Callback<Group> {
                         override fun onResponse(call: Call<Group>, response: Response<Group>) {
                             if (response.isSuccessful) {
@@ -117,7 +118,7 @@ class GroupSettingsDialog(
             .show()
     }
 
-    private fun showAddMemberDialog(group: Group) {
+    private fun showAddMemberDialog() {
         val dialog = AlertDialog.Builder(context)
             .setTitle("添加群成员")
             .create()
@@ -125,7 +126,7 @@ class GroupSettingsDialog(
         val view = LayoutInflater.from(context).inflate(R.layout.dialog_add_member, null)
         val contactsList = view.findViewById<RecyclerView>(R.id.contactsList)
 
-        ApiClient.service.getUserContacts(currentUserId)
+        ApiClient.apiService.getUserContacts(currentUserId)
             .enqueue(object : Callback<List<User>> {
                 override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
                     if (response.isSuccessful) {
@@ -137,21 +138,7 @@ class GroupSettingsDialog(
                             val adapter = ContactSelectionAdapter(
                                 contacts = availableContacts
                             ) { selectedUser: User ->
-                                ApiClient.service.addGroupMember(group.id, selectedUser.id)
-                                    .enqueue(object : Callback<Group> {
-                                        override fun onResponse(call: Call<Group>, response: Response<Group>) {
-                                            if (response.isSuccessful) {
-                                                Toast.makeText(context, "已添加成员", Toast.LENGTH_SHORT).show()
-                                                dialog.dismiss()
-                                            } else {
-                                                Toast.makeText(context, "添加成员失败", Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-
-                                        override fun onFailure(call: Call<Group>, t: Throwable) {
-                                            Toast.makeText(context, "网络错误", Toast.LENGTH_SHORT).show()
-                                        }
-                                    })
+                                addMemberToGroup(selectedUser)
                             }
 
                             contactsList.apply {
@@ -170,5 +157,22 @@ class GroupSettingsDialog(
 
         dialog.setView(view)
         dialog.show()
+    }
+
+    private fun addMemberToGroup(user: User) {
+        ApiClient.apiService.addGroupMember(group.id, user.id)
+            .enqueue(object : Callback<Group> {
+                override fun onResponse(call: Call<Group>, response: Response<Group>) {
+                    if (response.isSuccessful) {
+                        Toast.makeText(context, "已添加成员", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "添加成员失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                override fun onFailure(call: Call<Group>, t: Throwable) {
+                    Toast.makeText(context, "网络错误", Toast.LENGTH_SHORT).show()
+                }
+            })
     }
 } 

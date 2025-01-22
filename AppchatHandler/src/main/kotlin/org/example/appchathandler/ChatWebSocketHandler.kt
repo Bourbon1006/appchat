@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap
 import com.fasterxml.jackson.databind.JsonNode
 import org.example.appchathandler.dto.WebSocketMessageDTO
 import org.example.appchathandler.entity.User
-import org.example.appchathandler.dto.ChatMessageDTO
+import org.example.appchathandler.dto.MessageDTO
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.core.type.TypeReference
 
@@ -56,7 +56,7 @@ class ChatWebSocketHandler(
         online = online
     )
 
-    private fun Message.toDTO() = ChatMessageDTO(
+    private fun Message.toDTO() = MessageDTO(
         id = id,
         content = content,
         timestamp = timestamp,
@@ -65,9 +65,8 @@ class ChatWebSocketHandler(
         receiverId = receiver?.id,
         receiverName = receiver?.username,
         groupId = group?.id,
-        type = type.name,
-        fileUrl = fileUrl,
-        isRead = isRead
+        type = type,
+        fileUrl = fileUrl
     )
 
     private fun FriendRequest.toDTO() = FriendRequestDTO(
@@ -88,7 +87,7 @@ class ChatWebSocketHandler(
             val receiverId: Long? = null,
             val receiverName: String? = null,
             val content: String,
-            val type: MessageType = MessageType.TEXT,
+            val type: org.example.appchathandler.entity.MessageType = org.example.appchathandler.entity.MessageType.TEXT,
             val fileUrl: String? = null,
             val timestamp: LocalDateTime = LocalDateTime.now(),
             val isRead: Boolean = false
@@ -178,7 +177,9 @@ class ChatWebSocketHandler(
             
         when (msg["type"] as String) {
             "CHAT" -> {
-                val messageType = MessageType.valueOf(msg["messageType"] as? String ?: "TEXT")
+                val messageType = MessageType.valueOf(
+                    msg["messageType"] as? String ?: "TEXT"
+                )
                 val content = msg["content"] as String
                 val senderId = (msg["senderId"] as Number).toLong()
                 val senderName = msg["senderName"] as? String
@@ -220,6 +221,25 @@ class ChatWebSocketHandler(
                     "type" to "friendRequestResult",
                     "friendRequest" to request
                 ))))
+            }
+            "history" -> {
+                val messages = msg["messages"] as? List<Map<String, Any>>
+                messages?.forEach { message ->
+                    val savedMessage = messageService.createMessage(
+                        content = message["content"] as String,
+                        senderId = message["senderId"] as Long,
+                        receiverId = message["receiverId"] as? Long,
+                        type = MessageType.valueOf(message["type"] as String),
+                        fileUrl = message["fileUrl"] as? String
+                    )
+                    val dto = savedMessage.toDTO()
+                    sessions[savedMessage.sender.id]?.sendMessage(TextMessage(objectMapper.writeValueAsString(
+                        WebSocketMessageDTO(
+                            type = "message",
+                            message = dto
+                        )
+                    )))
+                }
             }
             else -> {
                 session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
@@ -351,14 +371,14 @@ class ChatWebSocketHandler(
         val memberIds = message["memberIds"] as List<Number>
 
         try {
-            val group = groupService.createGroup(name, creatorId.toLong(), memberIds.map { it.toLong() })
+            val groupDto = groupService.createGroup(name, creatorId.toLong(), memberIds.map { it.toLong() })
             
             // 通知所有群成员
-            group.members.forEach { member ->
+            groupDto.members.forEach { member ->
                 sessions[member.id]?.sendMessage(TextMessage(objectMapper.writeValueAsString(
                     WebSocketMessageDTO(
                         type = "groupCreated",
-                        group = group
+                        groupDTO = groupDto  // 使用 GroupDTO
                     )
                 )))
             }

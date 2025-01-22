@@ -3,6 +3,7 @@ package com.example.appchat.api
 import com.example.appchat.model.*
 import com.example.appchat.model.CreateGroupRequest
 import retrofit2.Call
+import retrofit2.Response
 import retrofit2.http.*
 import okhttp3.MultipartBody
 import retrofit2.http.Multipart
@@ -66,8 +67,8 @@ interface ApiService {
 
     @GET("api/messages/private")
     fun getPrivateMessages(
-        @Query("user1Id") user1Id: Long,
-        @Query("user2Id") user2Id: Long
+        @Query("userId") userId: Long,
+        @Query("otherId") otherId: Long
     ): Call<List<ChatMessage>>
 
     @GET("api/messages/user/{userId}")
@@ -89,4 +90,16 @@ interface ApiService {
     @Multipart
     @POST("api/files/upload")
     fun uploadFile(@Part file: MultipartBody.Part): Call<FileDTO>
+
+    @DELETE("api/messages/{messageId}")
+    suspend fun deleteMessage(
+        @Path("messageId") messageId: Long,
+        @Query("userId") userId: Long
+    ): Response<Unit>
+
+    @DELETE("messages/all")
+    suspend fun deleteAllMessages(
+        @Query("userId") userId: Long,
+        @Query("otherId") otherId: Long
+    ): Response<Unit>
 }

@@ -48,41 +48,45 @@ class LoginActivity : AppCompatActivity() {
             progressBar.visibility = View.VISIBLE
             loginButton.isEnabled = false
 
-            val request = LoginRequest(username, password)
-            ApiClient.service.login(request).enqueue(object : Callback<AuthResponse> {
-                override fun onResponse(call: Call<AuthResponse>, response: Response<AuthResponse>) {
-                    progressBar.visibility = View.GONE
-                    loginButton.isEnabled = true
-
-                    if (response.isSuccessful) {
-                        response.body()?.let { authResponse ->
-                            // 保存用户信息
-                            UserPreferences.saveUserInfo(
-                                context = this@LoginActivity,
-                                userId = authResponse.userId,
-                                username = authResponse.username,
-                                token = authResponse.token  // token 可能为 null
-                            )
-
-                            // 跳转到主界面
-                            startActivity(Intent(this@LoginActivity, MainActivity::class.java))
-                            finish()
-                        }
-                    } else {
-                        Toast.makeText(this@LoginActivity, "登录失败", Toast.LENGTH_SHORT).show()
-                    }
-                }
-
-                override fun onFailure(call: Call<AuthResponse>, t: Throwable) {
-                    progressBar.visibility = View.GONE
-                    loginButton.isEnabled = true
-                    Toast.makeText(this@LoginActivity, "网络错误", Toast.LENGTH_SHORT).show()
-                }
-            })
+            performLogin(username, password)
         }
 
         registerButton.setOnClickListener {
             startActivity(Intent(this, RegisterActivity::class.java))
         }
+    }
+
+    private fun performLogin(username: String, password: String) {
+        val request = LoginRequest(username, password)
+        ApiClient.apiService.login(request).enqueue(object : Callback<AuthResponse> {
+            override fun onResponse(call: Call<AuthResponse>, response: Response<AuthResponse>) {
+                progressBar.visibility = View.GONE
+                loginButton.isEnabled = true
+
+                if (response.isSuccessful) {
+                    response.body()?.let { authResponse ->
+                        // 保存用户信息
+                        UserPreferences.saveUserInfo(
+                            context = this@LoginActivity,
+                            userId = authResponse.userId,
+                            username = authResponse.username,
+                            token = authResponse.token  // token 可能为 null
+                        )
+
+                        // 跳转到主界面
+                        startActivity(Intent(this@LoginActivity, MainActivity::class.java))
+                        finish()
+                    }
+                } else {
+                    Toast.makeText(this@LoginActivity, "登录失败", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            override fun onFailure(call: Call<AuthResponse>, t: Throwable) {
+                progressBar.visibility = View.GONE
+                loginButton.isEnabled = true
+                Toast.makeText(this@LoginActivity, "网络错误", Toast.LENGTH_SHORT).show()
+            }
+        })
     }
 } 

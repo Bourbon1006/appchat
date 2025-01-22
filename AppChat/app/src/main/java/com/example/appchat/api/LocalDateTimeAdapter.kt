@@ -3,42 +3,41 @@ package com.example.appchat.api
 import com.google.gson.*
 import java.lang.reflect.Type
 import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
-class LocalDateTimeAdapter : JsonDeserializer<LocalDateTime>, JsonSerializer<LocalDateTime> {
-    override fun deserialize(
-        json: JsonElement?,
-        typeOfT: Type?,
-        context: JsonDeserializationContext?
-    ): LocalDateTime {
-        if (json == null) {
-            return LocalDateTime.now()
-        }
-
-        return when {
-            json.isJsonArray -> {
-                val array = json.asJsonArray
-                LocalDateTime.of(
-                    array[0].asInt,  // year
-                    array[1].asInt,  // month
-                    array[2].asInt,  // day
-                    array[3].asInt,  // hour
-                    array[4].asInt,  // minute
-                    array[5].asInt,  // second
-                    array[6].asInt   // nanosecond
-                )
-            }
-            json.isJsonPrimitive -> {
-                LocalDateTime.parse(json.asString)
-            }
-            else -> LocalDateTime.now()
-        }
-    }
-
+class LocalDateTimeAdapter : JsonSerializer<LocalDateTime>, JsonDeserializer<LocalDateTime> {
     override fun serialize(
         src: LocalDateTime?,
         typeOfSrc: Type?,
         context: JsonSerializationContext?
     ): JsonElement {
-        return JsonPrimitive(src.toString())
+        return JsonPrimitive(src?.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
+    }
+
+    override fun deserialize(
+        json: JsonElement?,
+        typeOfT: Type?,
+        context: JsonDeserializationContext?
+    ): LocalDateTime {
+        return when {
+            json?.isJsonArray == true -> {
+                // 处理数组格式的时间戳
+                val arr = json.asJsonArray
+                LocalDateTime.of(
+                    arr.get(0).asInt, // year
+                    arr.get(1).asInt, // month
+                    arr.get(2).asInt, // day
+                    arr.get(3).asInt, // hour
+                    arr.get(4).asInt, // minute
+                    arr.get(5).asInt, // second
+                    arr.get(6).asInt  // nanosecond
+                )
+            }
+            json?.isJsonPrimitive == true -> {
+                // 处理字符串格式的时间戳
+                LocalDateTime.parse(json.asString, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+            }
+            else -> throw JsonParseException("Invalid timestamp format")
+        }
     }
 } 

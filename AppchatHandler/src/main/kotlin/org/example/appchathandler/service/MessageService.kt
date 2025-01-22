@@ -7,6 +7,8 @@ import org.example.appchathandler.repository.MessageRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
+import org.example.appchathandler.dto.MessageDTO
+import org.example.appchathandler.dto.toDTO
 
 @Service
 class MessageService(
@@ -41,12 +43,15 @@ class MessageService(
         }
 
         val message = Message(
+            id = 0,
             content = content,
+            timestamp = LocalDateTime.now(),
             sender = sender,
             receiver = receiver,
             group = group,
             type = type,
-            fileUrl = fileUrl
+            fileUrl = fileUrl,
+            deletedForUsers = mutableSetOf()
         )
 
         return messageRepository.save(message)
@@ -62,10 +67,31 @@ class MessageService(
         return messageRepository.findByGroupOrderByTimestampAsc(group)
     }
 
-    fun getPrivateMessages(userId1: Long, userId2: Long): List<Message> {
-        userService.getUser(userId1)
-        userService.getUser(userId2)
-        return messageRepository.findByPrivateChat(userId1, userId2)
+    fun getPrivateMessages(userId: Long, otherId: Long): List<MessageDTO> {
+        try {
+            // 验证用户是否存在
+            val user = userService.getUser(userId)
+            val otherUser = userService.getUser(otherId)
+            
+            return messageRepository.findMessagesBetweenUsers(userId, otherId)
+                .map { message -> 
+                    MessageDTO(
+                        id = message.id,
+                        content = message.content,
+                        timestamp = message.timestamp,
+                        senderId = message.sender.id,
+                        senderName = message.sender.username,
+                        receiverId = message.receiver?.id,
+                        receiverName = message.receiver?.username,
+                        groupId = message.group?.id,
+                        type = message.type ?: MessageType.TEXT,  // 处理可能为空的情况
+                        fileUrl = message.fileUrl
+                    )
+                }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            throw e
+        }
     }
 
     fun getUserMessages(userId: Long): List<Message> {
@@ -111,5 +137,37 @@ class MessageService(
             startTime,
             endTime
         )
+    }
+
+    @Transactional
+    fun deleteMessage(messageId: Long, userId: Long) {
+        val message = messageRepository.findById(messageId).orElseThrow()
+        message.deletedForUsers.add(userId)
+        messageRepository.save(message)
+    }
+
+    @Transactional
+    fun deleteAllMessages(userId: Long, otherId: Long) {
+        val messages = messageRepository.findMessagesBetweenUsers(userId, otherId)
+        messages.forEach { message ->
+            message.deletedForUsers.add(userId)
+            messageRepository.save(message)
+        }
+    }
+
+    fun getMessages(userId: Long, otherId: Long): List<MessageDTO> {
+        return messageRepository.findMessagesBetweenUsers(userId, otherId)
+            .map { message -> MessageDTO(
+                id = message.id,
+                content = message.content,
+                timestamp = message.timestamp,
+                senderId = message.sender.id,
+                senderName = message.sender.username,
+                receiverId = message.receiver?.id,
+                receiverName = message.receiver?.username,
+                groupId = message.group?.id,
+                type = message.type,
+                fileUrl = message.fileUrl
+            )}
     }
 } 

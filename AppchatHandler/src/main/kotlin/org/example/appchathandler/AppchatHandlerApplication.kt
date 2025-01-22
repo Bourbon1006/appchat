@@ -1,6 +1,7 @@
 package org.example.appchathandler
 
 import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.boot.autoconfigure.domain.EntityScan
 import org.springframework.boot.runApplication
 import org.springframework.context.annotation.Bean
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -13,8 +14,13 @@ import com.fasterxml.jackson.databind.SerializationFeature
 import jakarta.annotation.PostConstruct
 import org.springframework.beans.factory.annotation.Value
 import java.io.File
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories
+import org.springframework.context.annotation.ComponentScan
 
 @SpringBootApplication
+@EnableJpaRepositories(basePackages = ["org.example.appchathandler.repository"])
+@EntityScan(basePackages = ["org.example.appchathandler.entity"])
+@ComponentScan(basePackages = ["org.example.appchathandler"])
 class AppchatHandlerApplication {
     @Value("\${file.upload.dir}")
     private lateinit var uploadDir: String

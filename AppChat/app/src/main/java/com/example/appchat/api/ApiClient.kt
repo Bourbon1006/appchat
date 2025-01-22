@@ -10,32 +10,23 @@ import com.google.gson.GsonBuilder
 import java.time.LocalDateTime
 
 object ApiClient {
-    private lateinit var retrofit: Retrofit
+    private const val BASE_URL = "http://192.168.31.194:8080/"
 
-    fun init(context: Context) {
-        val gson = GsonBuilder()
-            .registerTypeAdapter(LocalDateTime::class.java, LocalDateTimeAdapter())
-            .create()
+    private val gson = GsonBuilder()
+        .registerTypeAdapter(LocalDateTime::class.java, LocalDateTimeAdapter())
+        .create()
 
-        val loggingInterceptor = HttpLoggingInterceptor().apply {
+    private val client = OkHttpClient.Builder()
+        .addInterceptor(HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
-        }
+        })
+        .build()
 
-        val client = OkHttpClient.Builder()
-            .addInterceptor(loggingInterceptor)
-            .build()
+    private val retrofit = Retrofit.Builder()
+        .baseUrl(BASE_URL)
+        .client(client)
+        .addConverterFactory(GsonConverterFactory.create(gson))
+        .build()
 
-        retrofit = Retrofit.Builder()
-            .baseUrl(context.getString(R.string.server_url_format).format(
-                context.getString(R.string.server_ip),
-                context.getString(R.string.server_port)
-            ))
-            .addConverterFactory(GsonConverterFactory.create(gson))
-            .client(client)
-            .build()
-    }
-
-    val service: ApiService by lazy {
-        retrofit.create(ApiService::class.java)
-    }
+    val apiService: ApiService = retrofit.create(ApiService::class.java)
 } 
