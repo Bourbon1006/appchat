@@ -79,4 +79,11 @@ class UserService(
         }
         return user.toDTO()
     }
+
+    fun searchUsers(keyword: String): List<UserDTO> {
+        println("Searching users with keyword: $keyword")
+        return userRepository.findByUsernameContainingIgnoreCase(keyword)
+            .map { it.toDTO() }
+            .also { println("Found ${it.size} users") }
+    }
 } 

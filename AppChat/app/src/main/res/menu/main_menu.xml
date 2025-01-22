@@ -16,4 +16,9 @@
         android:title="退出登录"
         android:icon="@drawable/ic_logout"
         app:showAsAction="never"/>
+    <item
+        android:id="@+id/action_search"
+        android:icon="@drawable/ic_search"
+        android:title="搜索用户"
+        app:showAsAction="ifRoom"/>
 </menu> 

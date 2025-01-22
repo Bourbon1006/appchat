@@ -65,9 +65,10 @@ class UserController(private val userService: UserService) {
     }
 
     @GetMapping("/search")
-    fun searchUsers(@RequestParam keyword: String): List<UserDTO> {
-        return userService.getAllUsers().filter { 
-            it.username.contains(keyword, ignoreCase = true) 
-        }
+    fun searchUsers(@RequestParam keyword: String): ResponseEntity<List<UserDTO>> {
+        println("Received search request with keyword: $keyword") // 添加日志
+        val results = userService.searchUsers(keyword)
+        println("Returning ${results.size} results") // 添加日志
+        return ResponseEntity.ok(results)
     }
 } 

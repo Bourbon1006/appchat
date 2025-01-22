@@ -12,32 +12,42 @@
         android:layout_height="wrap_content"
         android:textSize="12sp"
         android:textColor="@android:color/darker_gray"
-        android:layout_marginEnd="8dp"
-        android:layout_marginBottom="4dp"/>
+        android:layout_marginEnd="8dp"/>
 
     <LinearLayout
+        android:id="@+id/fileContainer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:gravity="end">
+        android:background="@drawable/message_sent_background"
+        android:padding="12dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:foreground="?attr/selectableItemBackground">
 
-        <TextView
-            android:id="@+id/timeText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textSize="12sp"
-            android:textColor="@android:color/darker_gray"
-            android:layout_marginEnd="8dp"
-            android:layout_gravity="bottom"/>
+        <ImageView
+            android:id="@+id/fileIcon"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_file"
+            android:visibility="gone"
+            android:layout_marginEnd="8dp"/>
 
         <TextView
             android:id="@+id/messageText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="@drawable/message_sent_background"
             android:maxWidth="240dp"
-            android:padding="12dp"
             android:textColor="@android:color/white"
             android:textSize="16sp"/>
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/timeText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="12sp"
+        android:textColor="@android:color/darker_gray"
+        android:layout_marginTop="4dp"/>
+
 </LinearLayout> 

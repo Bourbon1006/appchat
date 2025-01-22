@@ -20,6 +20,8 @@ import com.fasterxml.jackson.databind.JsonNode
 import org.example.appchathandler.dto.WebSocketMessageDTO
 import org.example.appchathandler.entity.User
 import org.example.appchathandler.dto.ChatMessageDTO
+import com.fasterxml.jackson.module.kotlin.readValue
+import com.fasterxml.jackson.core.type.TypeReference
 
 @Component
 class ChatWebSocketHandler(
@@ -171,58 +173,71 @@ class ChatWebSocketHandler(
     }
 
     override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
-        try {
-            val messageNode = objectMapper.readTree(message.payload)
-            val type = messageNode["type"].asText()
+        val msg: Map<String, Any> = objectMapper.readValue(message.payload, 
+            object : TypeReference<Map<String, Any>>() {})
+            
+        when (msg["type"] as String) {
+            "CHAT" -> {
+                val messageType = MessageType.valueOf(msg["messageType"] as? String ?: "TEXT")
+                val content = msg["content"] as String
+                val senderId = (msg["senderId"] as Number).toLong()
+                val senderName = msg["senderName"] as? String
+                val receiverId = (msg["receiverId"] as? Number)?.toLong()
+                val groupId = (msg["groupId"] as? Number)?.toLong()
+                val fileUrl = msg["fileUrl"] as? String
 
-            when (type) {
-                "CHAT" -> {
-                    // 根据消息是否包含 groupId 来区分私聊和群聊
-                    if (messageNode.has("groupId")) {
-                        handleGroupMessage(messageNode, session)
-                    } else {
-                        handlePrivateMessage(messageNode, session)
-                    }
-                }
-                "FRIEND_REQUEST" -> handleFriendRequest(messageNode, session)
-                "CREATE_GROUP" -> handleCreateGroup(messageNode, session)
-                "HANDLE_FRIEND_REQUEST" -> {
-                    val requestId = messageNode.get("requestId").asLong()
-                    val accept = messageNode.get("accept").asBoolean()
-                    
-                    val request = friendRequestService.handleFriendRequest(requestId, accept)
-                    
-                    // 通知发送者请求结果
-                    sessions[request.sender.id]?.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
-                        "type" to "friendRequestResult",
-                        "friendRequest" to request
-                    ))))
-                }
-                else -> {
-                    session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
-                        "type" to "error",
-                        "message" to "Unsupported message type: $type"
-                    ))))
+                // 根据消息是否包含 groupId 来区分私聊和群聊
+                if (groupId != null) {
+                    handleGroupMessage(
+                        content = content,
+                        senderId = senderId,
+                        groupId = groupId,
+                        type = messageType,
+                        fileUrl = fileUrl,
+                        session = session
+                    )
+                } else {
+                    handlePrivateMessage(
+                        content = content,
+                        senderId = senderId,
+                        receiverId = receiverId,
+                        type = messageType,
+                        fileUrl = fileUrl,
+                        session = session
+                    )
                 }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            session.sendMessage(TextMessage(objectMapper.writeValueAsString(
-                WebSocketMessageDTO(
-                    type = "error",
-                    error = e.message
-                )
-            )))
+            "FRIEND_REQUEST" -> handleFriendRequest(msg, session)
+            "CREATE_GROUP" -> handleCreateGroup(msg, session)
+            "HANDLE_FRIEND_REQUEST" -> {
+                val requestId = msg["requestId"] as Number
+                val accept = msg["accept"] as Boolean
+                
+                val request = friendRequestService.handleFriendRequest(requestId.toLong(), accept)
+                
+                // 通知发送者请求结果
+                sessions[request.sender.id]?.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
+                    "type" to "friendRequestResult",
+                    "friendRequest" to request
+                ))))
+            }
+            else -> {
+                session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
+                    "type" to "error",
+                    "message" to "Unsupported message type: ${msg["type"]}"
+                ))))
+            }
         }
     }
 
-    private fun handleGroupMessage(messageNode: JsonNode, session: WebSocketSession) {
-        val senderId = messageNode["senderId"].asLong()
-        val groupId = messageNode["groupId"].asLong()
-        val content = messageNode["content"].asText()
-        val type = MessageType.valueOf(messageNode["messageType"]?.asText() ?: "TEXT")
-        val fileUrl = messageNode["fileUrl"]?.asText()
-
+    private fun handleGroupMessage(
+        content: String,
+        senderId: Long,
+        groupId: Long,
+        type: MessageType,
+        fileUrl: String?,
+        session: WebSocketSession
+    ) {
         try {
             val savedMessage = messageService.createMessage(
                 content = content,
@@ -252,13 +267,14 @@ class ChatWebSocketHandler(
         }
     }
 
-    private fun handlePrivateMessage(messageNode: JsonNode, session: WebSocketSession) {
-        val senderId = messageNode["senderId"].asLong()
-        val receiverId = messageNode["receiverId"].asLong()
-        val content = messageNode["content"].asText()
-        val type = MessageType.valueOf(messageNode["messageType"]?.asText() ?: "TEXT")
-        val fileUrl = messageNode["fileUrl"]?.asText()
-
+    private fun handlePrivateMessage(
+        content: String,
+        senderId: Long,
+        receiverId: Long?,
+        type: MessageType,
+        fileUrl: String?,
+        session: WebSocketSession
+    ) {
         try {
             val savedMessage = messageService.createMessage(
                 content = content,
@@ -269,12 +285,14 @@ class ChatWebSocketHandler(
             )
 
             // 发送给接收者
-            sessions[receiverId]?.sendMessage(TextMessage(objectMapper.writeValueAsString(
-                WebSocketMessageDTO(
-                    type = "message",
-                    message = savedMessage.toDTO()
-                )
-            )))
+            receiverId?.let { id ->
+                sessions[id]?.sendMessage(TextMessage(objectMapper.writeValueAsString(
+                    WebSocketMessageDTO(
+                        type = "message",
+                        message = savedMessage.toDTO()
+                    )
+                )))
+            }
 
             // 发送给发送者（确认消息已发送）
             sessions[senderId]?.sendMessage(TextMessage(objectMapper.writeValueAsString(
@@ -293,18 +311,18 @@ class ChatWebSocketHandler(
         }
     }
 
-    private fun handleFriendRequest(messageNode: JsonNode, session: WebSocketSession) {
+    private fun handleFriendRequest(message: Map<String, Any>, session: WebSocketSession) {
         try {
             println("Processing friend request")
-            val senderId = messageNode["senderId"].asLong()
-            val receiverId = messageNode["receiverId"].asLong()
+            val senderId = message["senderId"] as Number
+            val receiverId = message["receiverId"] as Number
             
             println("Sending friend request from $senderId to $receiverId")
-            val request = friendRequestService.sendFriendRequest(senderId, receiverId)
+            val request = friendRequestService.sendFriendRequest(senderId.toLong(), receiverId.toLong())
             println("Friend request created: $request")
             
             // 通知接收者
-            sessions[receiverId]?.let { receiverSession ->
+            sessions[receiverId.toLong()]?.let { receiverSession ->
                 println("Sending notification to receiver")
                 receiverSession.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
                     "type" to "friendRequest",
@@ -313,7 +331,7 @@ class ChatWebSocketHandler(
             } ?: println("Receiver not online")
 
             // 通知发送者请求已发送
-            sessions[senderId]?.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
+            sessions[senderId.toLong()]?.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
                 "type" to "friendRequestSent",
                 "friendRequest" to request.toDTO()
             ))))
@@ -327,13 +345,13 @@ class ChatWebSocketHandler(
         }
     }
 
-    private fun handleCreateGroup(messageNode: JsonNode, session: WebSocketSession) {
-        val name = messageNode["name"].asText()
-        val creatorId = messageNode["creatorId"].asLong()
-        val memberIds = messageNode["memberIds"].map { it.asLong() }
+    private fun handleCreateGroup(message: Map<String, Any>, session: WebSocketSession) {
+        val name = message["name"] as String
+        val creatorId = message["creatorId"] as Number
+        val memberIds = message["memberIds"] as List<Number>
 
         try {
-            val group = groupService.createGroup(name, creatorId, memberIds)
+            val group = groupService.createGroup(name, creatorId.toLong(), memberIds.map { it.toLong() })
             
             // 通知所有群成员
             group.members.forEach { member ->

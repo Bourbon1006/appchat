@@ -44,6 +44,26 @@ import com.example.appchat.model.FriendRequest
 import com.example.appchat.model.WebSocketMessage
 import com.example.appchat.model.Group
 import com.example.appchat.model.CreateGroupRequest
+import android.net.Uri
+import android.provider.MediaStore
+import android.app.Activity
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
+import com.example.appchat.model.FileDTO
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import android.widget.ImageButton
+import android.content.ContentResolver
+import android.provider.OpenableColumns
+import java.io.File
+import java.io.InputStream
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.asRequestBody
+import android.os.Build
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.ActivityResultLauncher
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webSocket: WebSocket
@@ -68,6 +88,26 @@ class MainActivity : AppCompatActivity() {
     private var currentUserAdapter: UserAdapter? = null
     private var contactAdapter: ContactAdapter? = null
     private var currentChatGroupId: Long? = null
+    private val FILE_PICK_REQUEST = 1
+    private val STORAGE_PERMISSION_REQUEST = 2
+
+    private val filePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { uploadFile(it) }
+    }
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        if (permissions.all { it.value }) {
+            println("All permissions granted")
+            showFileChooser()
+        } else {
+            println("Some permissions denied")
+            Toast.makeText(this, "需要存储权限才能选择文件", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     private fun WebSocket.sendDebug(message: Any) {
         val json = gson.toJson(message)
@@ -122,6 +162,11 @@ class MainActivity : AppCompatActivity() {
             if (message.isNotEmpty()) {
                 sendMessage(message)
             }
+        }
+
+        findViewById<ImageButton>(R.id.attachButton).setOnClickListener {
+            println("Attach button clicked")
+            showFileChooser()
         }
     }
 
@@ -285,6 +330,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSearchDialog() {
+        println("Opening search dialog")
         val dialog = AlertDialog.Builder(this)
             .setTitle("搜索用户")
             .create()
@@ -293,9 +339,11 @@ class MainActivity : AppCompatActivity() {
         val searchInput = view.findViewById<EditText>(R.id.searchInput)
         val searchResults = view.findViewById<RecyclerView>(R.id.searchResults)
         val progressBar = view.findViewById<ProgressBar>(R.id.progressBar)
+        val searchButton = view.findViewById<Button>(R.id.searchButton)
 
+        println("Setting up search adapter")
         val adapter = SearchUserAdapter(UserPreferences.getUserId(this)) { user ->
-            // 发送好友请求
+            println("User selected: ${user.username}")
             webSocket.sendDebug(mapOf(
                 "type" to "FRIEND_REQUEST",
                 "senderId" to UserPreferences.getUserId(this),
@@ -309,30 +357,54 @@ class MainActivity : AppCompatActivity() {
             this.adapter = adapter
         }
 
-        searchInput.setOnEditorActionListener { v, actionId, event ->
-            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
-                val keyword = searchInput.text.toString()
-                if (keyword.isNotEmpty()) {
-                    progressBar.visibility = View.VISIBLE
-                    ApiClient.service.searchUsers(keyword)
-                        .enqueue(object : Callback<List<User>> {
-                            override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
-                                progressBar.visibility = View.GONE
-                                if (response.isSuccessful) {
-                                    response.body()?.let { users ->
-                                        adapter.updateUsers(users)
+        val performSearch = { keyword: String ->
+            if (keyword.isNotEmpty()) {
+                println("Performing search with keyword: $keyword")
+                progressBar.visibility = View.VISIBLE
+                adapter.updateUsers(emptyList()) // 清空之前的结果
+                ApiClient.service.searchUsers(keyword)
+                    .enqueue(object : Callback<List<User>> {
+                        override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
+                            println("Search API response code: ${response.code()}")
+                            println("Search API raw response: ${response.raw()}")
+                            progressBar.visibility = View.GONE
+                            if (response.isSuccessful) {
+                                response.body()?.let { users ->
+                                    println("Found ${users.size} users")
+                                    if (users.isEmpty()) {
+                                        Toast.makeText(this@MainActivity, "未找到匹配的用户", Toast.LENGTH_SHORT).show()
                                     }
-                                } else {
-                                    Toast.makeText(this@MainActivity, "搜索失败", Toast.LENGTH_SHORT).show()
+                                    adapter.updateUsers(users)
+                                } ?: run {
+                                    println("Response body is null")
+                                    Toast.makeText(this@MainActivity, "搜索结果为空", Toast.LENGTH_SHORT).show()
                                 }
+                            } else {
+                                val errorBody = response.errorBody()?.string()
+                                println("Search API error: $errorBody")
+                                Toast.makeText(this@MainActivity, "搜索失败: ${response.code()}", Toast.LENGTH_SHORT).show()
                             }
+                        }
 
-                            override fun onFailure(call: Call<List<User>>, t: Throwable) {
-                                progressBar.visibility = View.GONE
-                                Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
-                            }
-                        })
-                }
+                        override fun onFailure(call: Call<List<User>>, t: Throwable) {
+                            println("Search API failure: ${t.message}")
+                            t.printStackTrace()
+                            progressBar.visibility = View.GONE
+                            Toast.makeText(this@MainActivity, "网络错误: ${t.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    })
+            } else {
+                Toast.makeText(this@MainActivity, "请输入搜索关键词", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        searchButton.setOnClickListener {
+            performSearch(searchInput.text.toString())
+        }
+
+        searchInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                performSearch(searchInput.text.toString())
                 true
             } else {
                 false
@@ -677,5 +749,165 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         webSocket.close(1000, "Activity destroyed")
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.main_menu, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_search -> {
+                println("Search menu item clicked")
+                showSearchDialog()
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    private fun showFileChooser() {
+        println("Showing file chooser")
+        if (checkStoragePermission()) {
+            println("Storage permission granted")
+            filePickerLauncher.launch("*/*")
+        } else {
+            println("Requesting storage permission")
+            requestStoragePermission()
+        }
+    }
+
+    private fun checkStoragePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // Android 13 及以上版本
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_MEDIA_IMAGES
+            ) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_MEDIA_VIDEO
+            ) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_MEDIA_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            // Android 12 及以下版本
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            requestPermissionLauncher.launch(arrayOf(
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VIDEO,
+                Manifest.permission.READ_MEDIA_AUDIO
+            ))
+        } else {
+            requestPermissionLauncher.launch(arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ))
+        }
+    }
+
+    private fun uploadFile(uri: Uri) {
+        println("Starting file upload: $uri")
+        val contentResolver = applicationContext.contentResolver
+        val filename = getFileName(contentResolver, uri)
+        println("File name: $filename")
+        val inputStream = contentResolver.openInputStream(uri)
+        val file = inputStream?.let { createTempFile(it, filename) }
+        
+        if (file != null) {
+            val mediaType = contentResolver.getType(uri)?.toMediaTypeOrNull()
+            val requestFile = file.asRequestBody(mediaType)
+            
+            val body = MultipartBody.Part.createFormData("file", filename, requestFile)
+            
+            ApiClient.service.uploadFile(body).enqueue(object : Callback<FileDTO> {
+                override fun onResponse(call: Call<FileDTO>, response: Response<FileDTO>) {
+                    if (response.isSuccessful) {
+                        response.body()?.let { fileDTO ->
+                            sendFileMessage(fileDTO)
+                        }
+                    } else {
+                        Toast.makeText(this@MainActivity, "文件上传失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                
+                override fun onFailure(call: Call<FileDTO>, t: Throwable) {
+                    Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
+                }
+            })
+        }
+    }
+
+    private fun sendFileMessage(fileDTO: FileDTO) {
+        val message = mutableMapOf(
+            "type" to "CHAT",
+            "senderId" to UserPreferences.getUserId(this),
+            "senderName" to UserPreferences.getUsername(this),
+            "content" to fileDTO.filename,
+            "messageType" to "FILE",
+            "fileUrl" to "${getString(R.string.server_url_format).format(
+                getString(R.string.server_ip),
+                getString(R.string.server_port)
+            )}${fileDTO.url}"
+        )
+        
+        currentChatGroupId?.let { groupId ->
+            message["groupId"] = groupId
+        }
+        currentChatUserId?.let { userId ->
+            message["receiverId"] = userId
+        }
+        
+        println("Sending file message: $message")
+        webSocket.sendDebug(message)
+    }
+
+    private fun getFileName(contentResolver: ContentResolver, uri: Uri): String {
+        val displayName: String? = when (uri.scheme) {
+            "content" -> {
+                val cursor = contentResolver.query(uri, null, null, null, null)
+                cursor?.use {
+                    if (it.moveToFirst()) {
+                        val displayNameIndex = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (displayNameIndex >= 0) {
+                            it.getString(displayNameIndex)
+                        } else null
+                    } else null
+                }
+            }
+            "file" -> uri.lastPathSegment
+            else -> null
+        }
+        return displayName ?: "file"
+    }
+
+    private fun createTempFile(inputStream: InputStream, filename: String): File? {
+        return try {
+            val tempDir = cacheDir
+            val tempFile = File.createTempFile(filename, null, tempDir)
+            tempFile.outputStream().use { outputStream ->
+                inputStream.copyTo(outputStream)
+            }
+            tempFile
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    companion object {
+        private const val FILE_PICK_REQUEST = 1
+        private const val STORAGE_PERMISSION_REQUEST = 2
     }
 }

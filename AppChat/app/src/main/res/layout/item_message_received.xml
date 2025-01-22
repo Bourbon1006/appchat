@@ -3,7 +3,8 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:padding="8dp">
+    android:padding="8dp"
+    android:gravity="start">
 
     <TextView
         android:id="@+id/nameText"
@@ -11,31 +12,42 @@
         android:layout_height="wrap_content"
         android:textSize="12sp"
         android:textColor="@android:color/darker_gray"
-        android:layout_marginStart="8dp"
-        android:layout_marginBottom="4dp"/>
+        android:layout_marginStart="8dp"/>
 
     <LinearLayout
-        android:layout_width="match_parent"
+        android:id="@+id/fileContainer"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:background="@drawable/message_received_background"
+        android:padding="12dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:foreground="?attr/selectableItemBackground">
+
+        <ImageView
+            android:id="@+id/fileIcon"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_file"
+            android:visibility="gone"
+            android:layout_marginEnd="8dp"/>
 
         <TextView
             android:id="@+id/messageText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="@drawable/message_received_background"
             android:maxWidth="240dp"
-            android:padding="12dp"
             android:textColor="@android:color/black"
             android:textSize="16sp"/>
-
-        <TextView
-            android:id="@+id/timeText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textSize="12sp"
-            android:textColor="@android:color/darker_gray"
-            android:layout_marginStart="8dp"
-            android:layout_gravity="bottom"/>
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/timeText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="12sp"
+        android:textColor="@android:color/darker_gray"
+        android:layout_marginTop="4dp"/>
+
 </LinearLayout> 

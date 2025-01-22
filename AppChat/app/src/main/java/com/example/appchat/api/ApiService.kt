@@ -1,21 +1,13 @@
 package com.example.appchat.api
 
-import com.example.appchat.model.LoginRequest
-import com.example.appchat.model.RegisterRequest
-import com.example.appchat.model.AuthResponse
-import com.example.appchat.model.User
-import com.example.appchat.model.FriendRequest
-import com.example.appchat.model.Group
+import com.example.appchat.model.*
 import com.example.appchat.model.CreateGroupRequest
-import com.example.appchat.model.ChatMessage
 import retrofit2.Call
-import retrofit2.http.Body
-import retrofit2.http.GET
+import retrofit2.http.*
+import okhttp3.MultipartBody
+import retrofit2.http.Multipart
 import retrofit2.http.POST
-import retrofit2.http.Query
-import retrofit2.http.Path
-import retrofit2.http.PUT
-import retrofit2.http.DELETE
+import retrofit2.http.Part
 
 interface ApiService {
     @POST("api/auth/login")
@@ -93,4 +85,8 @@ interface ApiService {
         @Query("startDate") startDate: String,
         @Query("endDate") endDate: String
     ): Call<List<ChatMessage>>
-} 
+
+    @Multipart
+    @POST("api/files/upload")
+    fun uploadFile(@Part file: MultipartBody.Part): Call<FileDTO>
+}
