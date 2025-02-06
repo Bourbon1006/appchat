@@ -3,6 +3,7 @@ package org.example.appchathandler.service
 import org.example.appchathandler.dto.GroupDTO
 import org.example.appchathandler.dto.toDTO
 import org.example.appchathandler.entity.Group
+import org.example.appchathandler.entity.User
 import org.example.appchathandler.repository.GroupRepository
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -72,5 +73,12 @@ class GroupService(
     fun getUserGroups(userId: Long): List<GroupDTO> {
         val user = userService.getUser(userId)
         return groupRepository.findByMembersContaining(user).map { it.toDTO() }
+    }
+
+    fun getGroupMembers(groupId: Long): List<User> {
+        val group = getGroup(groupId)
+        return group.members.map { member ->
+            userService.getUser(member.id)
+        }
     }
 } 

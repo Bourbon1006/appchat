@@ -9,6 +9,8 @@ import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
 import org.example.appchathandler.dto.MessageDTO
 import org.example.appchathandler.dto.toDTO
+import org.example.appchathandler.model.Message as ModelMessage
+import org.example.appchathandler.model.MessageType as ModelMessageType
 
 @Service
 class MessageService(
@@ -169,5 +171,73 @@ class MessageService(
                 type = message.type,
                 fileUrl = message.fileUrl
             )}
+    }
+
+    fun findById(messageId: Long): Message? {
+        return messageRepository.findById(messageId).orElse(null)
+    }
+
+    fun markMessageAsDeleted(messageId: Long, userId: Long): Boolean {
+        val message = findById(messageId) ?: return false
+        
+        // 如果是群聊消息，直接删除
+        if (message.group != null) {
+            messageRepository.deleteById(messageId)
+            return true
+        }
+
+        // 如果是私聊消息，标记为该用户已删除
+        val deletedUsers = message.deletedForUsers.toMutableSet()
+        deletedUsers.add(userId)
+        message.deletedForUsers = deletedUsers
+        messageRepository.save(message)
+
+        // 检查是否所有相关用户都已删除
+        val allUsers = setOfNotNull(message.sender.id, message.receiver?.id)
+        
+        return if (allUsers.all { userId -> deletedUsers.contains(userId) }) {
+            // 如果所有用户都已删除，从数据库中完全删除
+            messageRepository.deleteById(messageId)
+            true
+        } else {
+            false
+        }
+    }
+
+    fun savePrivateMessage(message: Message, receiverId: Long): Message {
+        try {
+            println("⭐ Saving private message: senderId=${message.sender.id}, receiverId=$receiverId")
+            val receiver = userService.getUser(receiverId)
+            val newMessage = message.copy(receiver = receiver)
+            val savedMessage = messageRepository.save(newMessage)
+            println("✅ Private message saved successfully: id=${savedMessage.id}")
+            return savedMessage
+        } catch (e: Exception) {
+            e.printStackTrace()
+            println("❌ Error saving private message: ${e.message}")
+            throw e
+        }
+    }
+
+    fun saveGroupMessage(message: Message, groupId: Long): Message {
+        try {
+            println("⭐ Saving group message: senderId=${message.sender.id}, groupId=$groupId")
+            val groupDto = groupService.getGroup(groupId)
+            // 将 GroupDTO 转换为 Group 实体
+            val group = Group(
+                id = groupDto.id,
+                name = groupDto.name,
+                creator = userService.getUser(groupDto.creator.id),
+                members = groupDto.members.map { userService.getUser(it.id) }.toMutableSet()
+            )
+            val newMessage = message.copy(group = group)
+            val savedMessage = messageRepository.save(newMessage)
+            println("✅ Group message saved successfully: id=${savedMessage.id}")
+            return savedMessage
+        } catch (e: Exception) {
+            e.printStackTrace()
+            println("❌ Error saving group message: ${e.message}")
+            throw e
+        }
     }
 } 

@@ -1,5 +1,6 @@
 package org.example.appchathandler.service
 
+import jakarta.persistence.EntityNotFoundException
 import org.example.appchathandler.controller.UserController.UpdateUserRequest
 import org.example.appchathandler.entity.User
 import org.example.appchathandler.repository.UserRepository
@@ -9,26 +10,32 @@ import org.springframework.transaction.annotation.Transactional
 import java.util.NoSuchElementException
 import org.example.appchathandler.dto.UserDTO
 import org.example.appchathandler.dto.toDTO
+import org.slf4j.LoggerFactory
+import org.springframework.web.multipart.MultipartFile
 
 @Service
 class UserService(
     private val userRepository: UserRepository,
-    private val passwordEncoder: PasswordEncoder
+    private val passwordEncoder: PasswordEncoder,
+    private val fileService: FileService
 ) {
-    
+    private val logger = LoggerFactory.getLogger(UserService::class.java)
+
     @Transactional
-    fun setUserOnline(userId: Long, online: Boolean) {
+    fun setUserOnline(userId: Long, isOnline: Boolean) {
         val user = getUser(userId)
-        user.online = online
+        user.isOnline = isOnline
         userRepository.save(user)
     }
 
     fun getOnlineUsers(): List<UserDTO> {
-        return userRepository.findByOnlineTrue().map { it.toDTO() }
+        return userRepository.findByIsOnlineTrue().map { it.toDTO() }
     }
 
     fun getUser(userId: Long): User {
-        return userRepository.findById(userId).orElseThrow { NoSuchElementException("用户不存在") }
+        return userRepository.findById(userId).orElseThrow { 
+            NoSuchElementException("User not found with id: $userId")
+        }
     }
 
     fun getAllUsers(): List<UserDTO> {
@@ -37,10 +44,22 @@ class UserService(
 
     @Transactional
     fun updateUser(userId: Long, request: UpdateUserRequest): UserDTO {
+        logger.info("Updating user $userId with request: $request")
         val user = getUser(userId)
-        request.nickname?.let { user.nickname = it }
-        request.avatar?.let { user.avatar = it }
-        return userRepository.save(user).toDTO()
+        
+        request.nickname?.let { 
+            user.nickname = it
+            logger.info("Updated nickname to: $it")
+        }
+        
+        request.avatarUrl?.let { 
+            user.avatarUrl = it
+            logger.info("Updated avatarUrl to: $it")
+        }
+        
+        val savedUser = userRepository.save(user)
+        logger.info("User saved successfully")
+        return savedUser.toDTO()
     }
 
     @Transactional
@@ -57,13 +76,10 @@ class UserService(
     }
 
     fun createUser(username: String, password: String): User {
-        if (userRepository.findByUsername(username) != null) {
-            throw IllegalArgumentException("用户名已存在")
-        }
-        
         val user = User(
             username = username,
-            password = passwordEncoder.encode(password)
+            password = passwordEncoder.encode(password),
+            isOnline = false
         )
         return userRepository.save(user)
     }
@@ -85,5 +101,39 @@ class UserService(
         return userRepository.findByUsernameContainingIgnoreCase(keyword)
             .map { it.toDTO() }
             .also { println("Found ${it.size} users") }
+    }
+
+    fun updateAvatar(userId: Long, file: MultipartFile): UserDTO {
+        println("⭐ Processing avatar update for user: $userId")
+        
+        try {
+            val savedFile = fileService.saveFile(file)
+            println("✅ File saved successfully: ${savedFile.url}")
+            
+            val user = userRepository.findById(userId).orElseThrow {
+                println("❌ User not found: $userId")
+                NoSuchElementException("User not found")
+            }
+            
+            user.avatarUrl = savedFile.url
+            val updatedUser = userRepository.save(user)
+            println("✅ User avatar updated: ${updatedUser.avatarUrl}")
+            
+            return updatedUser.toDTO()
+        } catch (e: Exception) {
+            println("❌ Failed to update avatar: ${e.message}")
+            e.printStackTrace()
+            throw e
+        }
+    }
+
+    @Transactional
+    fun updateUserAvatar(userId: Long, avatarUrl: String): UserDTO {
+        val user = userRepository.findById(userId).orElseThrow {
+            throw EntityNotFoundException("User not found")
+        }
+        user.avatarUrl = avatarUrl
+        val savedUser = userRepository.save(user)
+        return savedUser.toDTO()
     }
 } 

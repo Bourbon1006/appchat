@@ -1,29 +1,65 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
-    <item
-        android:id="@+id/action_group_chat"
-        android:title="群聊"
-        android:icon="@drawable/ic_group_chat"
-        app:showAsAction="never"/>
-    <item
-        android:id="@+id/action_user_list"
-        android:title="用户列表"
-        android:icon="@drawable/ic_user_list"
-        app:showAsAction="never"/>
-    <item
-        android:id="@+id/action_logout"
-        android:title="退出登录"
-        android:icon="@drawable/ic_logout"
-        app:showAsAction="never"/>
+
+    <!-- 搜索按钮 -->
     <item
         android:id="@+id/action_search"
         android:icon="@drawable/ic_search"
-        android:title="搜索用户"
-        app:showAsAction="ifRoom"/>
+        android:title="搜索"
+        app:showAsAction="always">
+        <menu>
+            <item
+                android:id="@+id/action_search_messages"
+                android:icon="@drawable/ic_search"
+                android:title="搜索消息"
+                app:showAsAction="never" />
+            <item
+                android:id="@+id/action_search_users"
+                android:icon="@drawable/ic_search_user"
+                android:title="搜索用户"
+                app:showAsAction="never" />
+        </menu>
+    </item>
+
+    <!-- 删除按钮（默认隐藏） -->
     <item
-        android:id="@+id/action_search_messages"
-        android:icon="@drawable/ic_search_message"
-        android:title="搜索聊天记录"
-        app:showAsAction="ifRoom"/>
+        android:id="@+id/action_clear_chat"
+        android:icon="@drawable/ic_delete"
+        android:title="删除"
+        android:visible="false"
+        app:showAsAction="always" />
+
+    <!-- 更多按钮 -->
+    <item
+        android:id="@+id/action_more"
+        android:icon="@drawable/ic_more"
+        android:title="更多"
+        app:showAsAction="always">
+        <menu>
+            <item
+                android:id="@+id/menu_profile"
+                android:icon="@drawable/ic_profile"
+                android:title="个人资料"
+                app:showAsAction="never" />
+
+            <item
+                android:id="@+id/menu_group_chat"
+                android:icon="@drawable/ic_group_chat"
+                android:title="创建群聊"
+                app:showAsAction="never" />
+
+            <item
+                android:id="@+id/menu_contacts"
+                android:icon="@drawable/ic_contacts"
+                android:title="联系人"
+                app:showAsAction="never" />
+
+            <item
+                android:id="@+id/action_logout"
+                android:icon="@drawable/ic_logout"
+                android:title="退出登录"
+                app:showAsAction="never" />
+        </menu>
+    </item>
 </menu> 

@@ -14,29 +14,28 @@ import java.util.TimerTask
 import org.slf4j.LoggerFactory
 import java.io.IOException
 import org.springframework.beans.factory.annotation.Value
+import java.io.FileNotFoundException
+import java.lang.RuntimeException
 
 @Service
-class FileService {
+class FileService(
+    @Value("\${file.upload.dir}") private val uploadDirPath: String
+) {
     private val logger = LoggerFactory.getLogger(FileService::class.java)
     
-    @Value("\${file.upload.dir}")
-    private lateinit var uploadDirPath: String
-    
-    private val uploadDir by lazy {
-        File(System.getProperty("user.dir"), uploadDirPath).apply {
-            if (!exists()) {
-                logger.info("Creating upload directory at: ${absolutePath}")
-                if (!mkdirs()) {
-                    logger.error("Failed to create upload directory")
-                    throw IOException("Failed to create upload directory")
-                }
+    private val uploadDirectory = File(System.getProperty("user.dir"), uploadDirPath).apply {
+        if (!exists()) {
+            println("⭐ Creating uploads directory")
+            if (mkdirs()) {
+                println("✅ Created uploads directory: ${absolutePath}")
+            } else {
+                println("❌ Failed to create uploads directory")
             }
-            if (!canWrite()) {
-                logger.error("Upload directory is not writable")
-                throw IOException("Upload directory is not writable")
-            }
-            logger.info("Using upload directory: ${absolutePath}")
         }
+        println("⭐ Upload directory: ${absolutePath}")
+        println("⭐ Directory exists: ${exists()}")
+        println("⭐ Directory readable: ${canRead()}")
+        println("⭐ Directory writable: ${canWrite()}")
     }
 
     private val fileExpirationMap = ConcurrentHashMap<String, Long>()
@@ -59,7 +58,7 @@ class FileService {
         val now = System.currentTimeMillis()
         fileExpirationMap.entries.removeIf { (fileId, expireTime) ->
             if (now > expireTime) {
-                val file = uploadDir.listFiles()?.find { it.nameWithoutExtension == fileId }
+                val file = uploadDirectory.listFiles()?.find { it.nameWithoutExtension == fileId }
                 file?.delete()
                 true
             } else false
@@ -67,61 +66,49 @@ class FileService {
     }
 
     fun saveFile(file: MultipartFile): FileDTO {
-        if (file.isEmpty) {
-            logger.error("File is empty")
-            throw IllegalArgumentException("File is empty")
-        }
-
-        logger.info("Saving file: ${file.originalFilename}, size: ${file.size}, contentType: ${file.contentType}")
-        
         try {
-            val fileId = UUID.randomUUID().toString()
-            val extension = file.originalFilename?.substringAfterLast('.', "")
-            val filename = "$fileId.$extension"
-            val targetFile = File(uploadDir, filename)
-            
-            logger.info("Saving to: ${targetFile.absolutePath}")
-            
-            // 直接使用输入流复制文件，不做任何转换
-            file.inputStream.use { input ->
-                targetFile.outputStream().use { output ->
-                    input.copyTo(output)
-                }
+            // 确保上传目录存在
+            if (!uploadDirectory.exists()) {
+                uploadDirectory.mkdirs()
+                uploadDirectory.setReadable(true, false)
+                uploadDirectory.setWritable(true, false)
             }
+
+            // 生成唯一文件名
+            val originalFilename = file.originalFilename ?: "unknown"
+            val extension = originalFilename.substringAfterLast('.', "")
+            val uniqueFilename = "${UUID.randomUUID()}.$extension"
             
-            if (!targetFile.exists()) {
-                logger.error("File was not saved successfully")
-                throw IOException("Failed to save file")
-            }
-            
-            logger.info("File saved successfully at: ${targetFile.absolutePath}")
-            
-            fileExpirationMap[fileId] = System.currentTimeMillis() + EXPIRATION_TIME
-            
+            // 保存文件
+            val uploadedFile = File(uploadDirectory, uniqueFilename)
+            file.transferTo(uploadedFile)
+            uploadedFile.setReadable(true, false)
+            println("✅ File saved to: ${uploadedFile.absolutePath}")
+
+            // 构建文件URL
+            val fileUrl = "/api/files/$uniqueFilename"
+            println("✅ File URL: $fileUrl")
+
             return FileDTO(
-                id = fileId,
-                filename = file.originalFilename ?: filename,
-                url = "/api/files/download/$fileId",
-                size = targetFile.length(),
+                id = 0L,
+                filename = originalFilename,
+                url = fileUrl,
+                size = file.size,
                 contentType = file.contentType ?: "application/octet-stream"
             )
         } catch (e: Exception) {
-            logger.error("Error saving file", e)
-            throw RuntimeException("Failed to save file: ${e.message}", e)
+            e.printStackTrace()
+            println("❌ Failed to save file: ${e.message}")
+            throw RuntimeException("Failed to save file", e)
         }
     }
 
-    fun getFile(fileId: String): FileResource {
-        val file = uploadDir.listFiles()?.find { it.nameWithoutExtension == fileId }
-            ?: throw NoSuchElementException("File not found")
-            
-        // 更新文件过期时间
-        fileExpirationMap[fileId] = System.currentTimeMillis() + EXPIRATION_TIME
-            
-        return FileResource(
-            filename = file.name,
-            resource = FileSystemResource(file)
-        )
+    fun getFile(filename: String): File {
+        val file = File(uploadDirectory, filename)
+        if (!file.exists()) {
+            throw FileNotFoundException("File not found: $filename")
+        }
+        return file
     }
 
     fun markFileDownloaded(fileId: String) {

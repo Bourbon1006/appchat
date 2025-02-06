@@ -5,61 +5,70 @@
     android:orientation="vertical"
     android:padding="8dp">
 
-    <!-- 时间消息布局 -->
     <TextView
         android:id="@+id/timeText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:layout_marginTop="8dp"
-        android:layout_marginBottom="8dp"
-        android:textColor="@android:color/darker_gray"
+        android:textColor="#888888"
         android:textSize="12sp"
         android:visibility="gone" />
 
-    <!-- 消息内容布局 -->
     <LinearLayout
-        android:id="@+id/messageContainer"
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="start"
-        android:background="@drawable/bg_message_received"
-        android:orientation="vertical"
-        android:padding="8dp">
+        android:orientation="horizontal">
 
-        <!-- 发送者名称 -->
-        <TextView
-            android:id="@+id/senderName"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textColor="@android:color/darker_gray"
-            android:textSize="12sp"
-            android:visibility="gone" />
+        <ImageView
+            android:id="@+id/messageAvatar"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginEnd="8dp"
+            android:src="@drawable/default_avatar" />
 
-        <!-- 消息文本 -->
-        <TextView
-            android:id="@+id/messageText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textColor="#333333"
-            android:textSize="16sp"
-            android:maxWidth="280dp"
-            android:minWidth="50dp" />
-
-        <!-- 文件容器 -->
         <LinearLayout
-            android:id="@+id/fileContainer"
+            android:id="@+id/messageContainer"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginEnd="60dp"
+            android:background="@drawable/bg_message_received"
             android:orientation="vertical"
-            android:visibility="gone">
+            android:padding="4dp">
 
-            <ImageView
-                android:id="@+id/fileIcon"
+            <TextView
+                android:id="@+id/messageText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#000000"
+                android:textSize="16sp"
+                android:padding="8dp" />
+
+            <FrameLayout
+                android:id="@+id/fileContainer"
                 android:layout_width="200dp"
                 android:layout_height="200dp"
-                android:scaleType="centerCrop"
-                android:visibility="gone" />
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/fileIcon"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="centerCrop" />
+
+                <ImageView
+                    android:id="@+id/playIcon"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_play_circle"
+                    android:visibility="gone" />
+            </FrameLayout>
         </LinearLayout>
+
+        <CheckBox
+            android:id="@+id/messageCheckbox"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
     </LinearLayout>
 </LinearLayout> 

@@ -16,6 +16,8 @@ import com.example.appchat.adapter.ContactSelectionAdapter
 import com.example.appchat.api.ApiClient
 import com.example.appchat.model.Group
 import com.example.appchat.model.User
+import com.example.appchat.model.UserDTO
+import com.example.appchat.util.UserPreferences
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
@@ -48,12 +50,20 @@ class GroupSettingsDialog(
         addMemberButton.visibility = if (isCreator) View.VISIBLE else View.GONE
 
         val adapter = GroupMemberAdapter(
-            members = group.members,
-            currentUserId = currentUserId,
-            isCreator = isCreator
+            members = group.members.map { member -> 
+                UserDTO(
+                    id = member.id,
+                    username = member.username,
+                    nickname = member.nickname,
+                    avatarUrl = member.avatarUrl,
+                    isOnline = member.isOnline
+                )
+            },
+            currentUserId = UserPreferences.getUserId(context),
+            isCreator = group.creator.id == UserPreferences.getUserId(context)
         ) { user ->
-            if (isCreator) {
-                showRemoveMemberConfirmDialog(user)
+            if (group.creator.id == UserPreferences.getUserId(context)) {
+                showRemoveMemberConfirmDialog(group.id, user)
             }
         }
 
@@ -94,12 +104,12 @@ class GroupSettingsDialog(
         dialog.show()
     }
 
-    private fun showRemoveMemberConfirmDialog(user: User) {
+    private fun showRemoveMemberConfirmDialog(groupId: Long, user: UserDTO) {
         AlertDialog.Builder(context)
             .setTitle("移除成员")
             .setMessage("确定要将 ${user.username} 移出群聊吗？")
             .setPositiveButton("确定") { _, _ ->
-                ApiClient.apiService.removeGroupMember(group.id, user.id)
+                ApiClient.apiService.removeGroupMember(groupId, user.id)
                     .enqueue(object : Callback<Group> {
                         override fun onResponse(call: Call<Group>, response: Response<Group>) {
                             if (response.isSuccessful) {
@@ -126,9 +136,9 @@ class GroupSettingsDialog(
         val view = LayoutInflater.from(context).inflate(R.layout.dialog_add_member, null)
         val contactsList = view.findViewById<RecyclerView>(R.id.contactsList)
 
-        ApiClient.apiService.getUserContacts(currentUserId)
-            .enqueue(object : Callback<List<User>> {
-                override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
+        ApiClient.apiService.getUserContacts(UserPreferences.getUserId(context))
+            .enqueue(object : Callback<List<UserDTO>> {
+                override fun onResponse(call: Call<List<UserDTO>>, response: Response<List<UserDTO>>) {
                     if (response.isSuccessful) {
                         response.body()?.let { contacts ->
                             val availableContacts = contacts.filter { contact ->
@@ -137,7 +147,7 @@ class GroupSettingsDialog(
                             
                             val adapter = ContactSelectionAdapter(
                                 contacts = availableContacts
-                            ) { selectedUser: User ->
+                            ) { selectedUser: UserDTO ->
                                 addMemberToGroup(selectedUser)
                             }
 
@@ -149,7 +159,7 @@ class GroupSettingsDialog(
                     }
                 }
 
-                override fun onFailure(call: Call<List<User>>, t: Throwable) {
+                override fun onFailure(call: Call<List<UserDTO>>, t: Throwable) {
                     Toast.makeText(context, "加载联系人失败", Toast.LENGTH_SHORT).show()
                     dialog.dismiss()
                 }
@@ -159,7 +169,7 @@ class GroupSettingsDialog(
         dialog.show()
     }
 
-    private fun addMemberToGroup(user: User) {
+    private fun addMemberToGroup(user: UserDTO) {
         ApiClient.apiService.addGroupMember(group.id, user.id)
             .enqueue(object : Callback<Group> {
                 override fun onResponse(call: Call<Group>, response: Response<Group>) {

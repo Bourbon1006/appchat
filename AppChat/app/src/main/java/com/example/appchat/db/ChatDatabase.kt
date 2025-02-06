@@ -13,8 +13,9 @@ class ChatDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
 
     companion object {
         private const val DATABASE_NAME = "chat.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 3
         private const val TABLE_MESSAGES = "messages"
+        private const val TABLE_USERS = "users"
         
         private const val COLUMN_ID = "id"
         private const val COLUMN_SENDER_ID = "sender_id"
@@ -26,29 +27,52 @@ class ChatDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         private const val COLUMN_CHAT_TYPE = "chat_type"
         private const val COLUMN_RECEIVER_ID = "receiver_id"
         private const val COLUMN_GROUP_ID = "group_id"
+        private const val COLUMN_MESSAGE_ID = "id"
+        private const val COLUMN_DELETED_BY = "deleted_by"
+
+        // 创建消息表的 SQL
+        private const val CREATE_MESSAGES_TABLE = """
+            CREATE TABLE IF NOT EXISTS $TABLE_MESSAGES (
+                id INTEGER PRIMARY KEY,
+                sender_id INTEGER,
+                sender_name TEXT,
+                content TEXT,
+                type TEXT,
+                file_url TEXT,
+                timestamp TEXT,
+                chat_type TEXT,
+                receiver_id INTEGER,
+                group_id INTEGER,
+                deleted_by TEXT DEFAULT ''
+            )
+        """
+
+        // 创建用户表的 SQL
+        private const val CREATE_USERS_TABLE = """
+            CREATE TABLE IF NOT EXISTS $TABLE_USERS (
+                id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL,
+                avatar_url TEXT,
+                is_online INTEGER DEFAULT 0
+            )
+        """
     }
 
     override fun onCreate(db: SQLiteDatabase) {
-        val createTable = """
-            CREATE TABLE $TABLE_MESSAGES (
-                $COLUMN_ID INTEGER PRIMARY KEY,
-                $COLUMN_SENDER_ID INTEGER,
-                $COLUMN_SENDER_NAME TEXT,
-                $COLUMN_CONTENT TEXT,
-                $COLUMN_TYPE TEXT,
-                $COLUMN_FILE_URL TEXT,
-                $COLUMN_TIMESTAMP TEXT,
-                $COLUMN_CHAT_TYPE TEXT,
-                $COLUMN_RECEIVER_ID INTEGER,
-                $COLUMN_GROUP_ID INTEGER
-            )
-        """.trimIndent()
-        db.execSQL(createTable)
+        // 创建所有表
+        db.execSQL(CREATE_MESSAGES_TABLE)
+        db.execSQL(CREATE_USERS_TABLE)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_MESSAGES")
-        onCreate(db)
+        if (oldVersion < 3) {
+            // 添加 deleted_by 列
+            try {
+                db.execSQL("ALTER TABLE $TABLE_MESSAGES ADD COLUMN deleted_by TEXT DEFAULT ''")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun saveMessage(message: ChatMessage, chatType: String, receiverId: Long? = null, groupId: Long? = null) {
@@ -93,51 +117,65 @@ class ChatDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
     }
 
     fun deleteMessage(messageId: Long) {
-        val db = this.writableDatabase
-        try {
-            // 使用事务来确保删除操作的原子性
-            db.beginTransaction()
-            
-            // 先检查消息是否存在
-            val cursor = db.query(
-                TABLE_MESSAGES,
-                arrayOf(COLUMN_ID),
-                "$COLUMN_ID = ?",
-                arrayOf(messageId.toString()),
-                null,
-                null,
-                null
-            )
-            
-            if (cursor.count > 0) {
-                // 删除指定 ID 的消息
-                val result = db.delete(
-                    TABLE_MESSAGES,
-                    "$COLUMN_ID = ?",
-                    arrayOf(messageId.toString())
-                )
-                
-                if (result > 0) {
-                    db.setTransactionSuccessful()
-                    println("✅ Message deleted successfully from local database: $messageId")
-                } else {
-                    println("❌ Failed to delete message from local database: $messageId")
-                }
+        writableDatabase.delete(
+            TABLE_MESSAGES,
+            "$COLUMN_MESSAGE_ID = ?",
+            arrayOf(messageId.toString())
+        )
+    }
+
+    fun markMessageAsDeleted(messageId: Long, userId: Long) {
+        val cursor = writableDatabase.query(
+            TABLE_MESSAGES,
+            arrayOf("deleted_by"),
+            "id = ?",
+            arrayOf(messageId.toString()),
+            null,
+            null,
+            null
+        )
+
+        if (cursor.moveToFirst()) {
+            val currentDeletedBy = cursor.getString(0) ?: ""
+            val newDeletedBy = if (currentDeletedBy.isEmpty()) {
+                userId.toString()
             } else {
-                println("⚠️ Message not found in local database: $messageId")
+                "$currentDeletedBy,$userId"
             }
+
+            val values = ContentValues().apply {
+                put("deleted_by", newDeletedBy)
+            }
+
+            writableDatabase.update(
+                TABLE_MESSAGES,
+                values,
+                "id = ?",
+                arrayOf(messageId.toString())
+            )
+        }
+        cursor.close()
+    }
+
+    fun isMessageDeletedForUser(messageId: Long, userId: Long): Boolean {
+        val cursor = readableDatabase.query(
+            TABLE_MESSAGES,
+            arrayOf("deleted_by"),
+            "id = ?",
+            arrayOf(messageId.toString()),
+            null,
+            null,
+            null
+        )
+
+        return if (cursor.moveToFirst()) {
+            val deletedBy = cursor.getString(0) ?: ""
+            val deletedUsers = deletedBy.split(",").filter { it.isNotEmpty() }.map { it.toLong() }
             cursor.close()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            println("❌ Error deleting message from local database: ${e.message}")
-        } finally {
-            try {
-                db.endTransaction()
-                db.close()
-            } catch (e: Exception) {
-                e.printStackTrace()
-                println("❌ Error closing database: ${e.message}")
-            }
+            userId in deletedUsers
+        } else {
+            cursor.close()
+            false
         }
     }
 
@@ -184,33 +222,23 @@ class ChatDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
 
     fun getPrivateMessages(userId1: Long, userId2: Long): List<ChatMessage> {
         val messages = mutableListOf<ChatMessage>()
-        val db = this.readableDatabase
-        val selection = """
-            ($COLUMN_CHAT_TYPE = 'private' AND 
-            (($COLUMN_SENDER_ID = ? AND $COLUMN_RECEIVER_ID = ?) OR 
-            ($COLUMN_SENDER_ID = ? AND $COLUMN_RECEIVER_ID = ?)))
-        """.trimIndent()
-        val selectionArgs = arrayOf(
-            userId1.toString(), userId2.toString(),
-            userId2.toString(), userId1.toString()
-        )
-        
-        val cursor = db.query(
+        val cursor = readableDatabase.query(
             TABLE_MESSAGES,
             null,
-            selection,
-            selectionArgs,
+            "chat_type = 'private' AND ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))",
+            arrayOf(userId1.toString(), userId2.toString(), userId2.toString(), userId1.toString()),
             null,
             null,
-            "$COLUMN_TIMESTAMP ASC"
+            "timestamp ASC"
         )
 
-        cursor.use {
-            while (it.moveToNext()) {
-                messages.add(createMessageFromCursor(it))
+        while (cursor.moveToNext()) {
+            val messageId = cursor.getLong(cursor.getColumnIndexOrThrow("id"))
+            if (!isMessageDeletedForUser(messageId, userId1)) {
+                messages.add(createMessageFromCursor(cursor))
             }
         }
-        db.close()
+        cursor.close()
         return messages
     }
 
@@ -294,5 +322,37 @@ class ChatDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         cursor.close()
         db.close()
         return exists
+    }
+
+    // 添加更新用户头像的方法
+    fun updateUserAvatar(userId: Long, avatarUrl: String) {
+        writableDatabase.use { db ->
+            val values = ContentValues().apply {
+                put("avatar_url", avatarUrl)
+            }
+            db.update(TABLE_USERS, values, "id = ?", arrayOf(userId.toString()))
+        }
+    }
+
+    // 获取用户头像URL的方法
+    fun getUserAvatarUrl(userId: Long): String? {
+        readableDatabase.use { db ->
+            val cursor = db.query(
+                TABLE_USERS,
+                arrayOf("avatar_url"),
+                "id = ?",
+                arrayOf(userId.toString()),
+                null,
+                null,
+                null
+            )
+            return cursor.use {
+                if (it.moveToFirst()) {
+                    it.getString(it.getColumnIndexOrThrow("avatar_url"))
+                } else {
+                    null
+                }
+            }
+        }
     }
 } 

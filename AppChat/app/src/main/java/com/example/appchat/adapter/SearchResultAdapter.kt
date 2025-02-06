@@ -7,26 +7,15 @@ import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.example.appchat.R
 import com.example.appchat.model.ChatMessage
-import java.time.format.DateTimeFormatter
 
 class SearchResultAdapter(
-    private val results: List<Pair<ChatMessage, Int>>,
+    private val messages: List<Pair<ChatMessage, Int>>,  // 消息和其在原列表中的位置
     private val onItemClick: (Int) -> Unit
 ) : RecyclerView.Adapter<SearchResultAdapter.ViewHolder>() {
 
-    inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        private val messageText: TextView = itemView.findViewById(R.id.messageText)
-        private val timeText: TextView = itemView.findViewById(R.id.timeText)
-
-        fun bind(result: Pair<ChatMessage, Int>) {
-            val (message, position) = result
-            messageText.text = message.content
-            timeText.text = message.timestamp?.format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
-            
-            itemView.setOnClickListener {
-                onItemClick(position)
-            }
-        }
+    class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val messageText: TextView = view.findViewById(R.id.messageText)
+        val timeText: TextView = view.findViewById(R.id.timeText)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -36,8 +25,11 @@ class SearchResultAdapter(
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        holder.bind(results[position])
+        val (message, originalPosition) = messages[position]
+        holder.messageText.text = message.content
+        holder.timeText.text = message.timestamp.toString()
+        holder.itemView.setOnClickListener { onItemClick(originalPosition) }
     }
 
-    override fun getItemCount() = results.size
+    override fun getItemCount() = messages.size
 } 

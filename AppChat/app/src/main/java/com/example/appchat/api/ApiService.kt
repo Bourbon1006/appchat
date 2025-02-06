@@ -9,6 +9,7 @@ import okhttp3.MultipartBody
 import retrofit2.http.Multipart
 import retrofit2.http.POST
 import retrofit2.http.Part
+import okhttp3.ResponseBody
 
 interface ApiService {
     @POST("api/auth/login")
@@ -24,10 +25,10 @@ interface ApiService {
     fun getOnlineUsers(): Call<List<User>>
 
     @GET("api/users/search")
-    fun searchUsers(@Query("keyword") keyword: String): Call<List<User>>
+    fun searchUsers(@Query("keyword") keyword: String): Call<List<UserDTO>>
 
     @GET("api/users/{userId}/contacts")
-    fun getUserContacts(@Path("userId") userId: Long): Call<List<User>>
+    fun getUserContacts(@Path("userId") userId: Long): Call<List<UserDTO>>
 
     @POST("api/friend-requests")
     fun sendFriendRequest(@Body request: Map<String, Long>): Call<FriendRequest>
@@ -89,17 +90,45 @@ interface ApiService {
 
     @Multipart
     @POST("api/files/upload")
-    fun uploadFile(@Part file: MultipartBody.Part): Call<FileDTO>
+    fun uploadFile(
+        @Part file: MultipartBody.Part
+    ): Call<FileDTO>
 
     @DELETE("api/messages/{messageId}")
     suspend fun deleteMessage(
         @Path("messageId") messageId: Long,
         @Query("userId") userId: Long
-    ): Response<Unit>
+    ): Response<DeleteMessageResponse>
 
     @DELETE("messages/all")
     suspend fun deleteAllMessages(
         @Query("userId") userId: Long,
         @Query("otherId") otherId: Long
     ): Response<Unit>
+
+    @Multipart
+    @POST("api/users/{userId}/avatar")
+    fun uploadAvatar(
+        @Path("userId") userId: Long,
+        @Part avatar: MultipartBody.Part
+    ): Call<UserDTO>
+
+    @GET("api/users/{userId}/avatar")
+    fun getUserAvatar(@Path("userId") userId: Long): Call<ResponseBody>
+
+    @GET("api/users/{userId}/avatar")
+    fun getAvatar(@Path("userId") userId: Long): Call<ResponseBody>
+
+    @PUT("api/users/{userId}")
+    fun updateUser(
+        @Path("userId") userId: Long,
+        @Body request: UpdateUserRequest
+    ): Call<UserDTO>
+
+    @GET("api/users/{userId}")
+    fun getUser(@Path("userId") userId: Long): Call<UserDTO>
 }
+
+data class DeleteMessageResponse(
+    val isFullyDeleted: Boolean  // 表示消息是否已被所有相关用户删除
+)

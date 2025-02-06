@@ -9,13 +9,13 @@
         android:id="@+id/searchInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="输入要搜索的内容"
+        android:hint="输入搜索关键词"
         android:imeOptions="actionSearch"
         android:inputType="text"
         android:maxLines="1" />
 
     <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/searchResultsList"
+        android:id="@+id/searchResults"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"

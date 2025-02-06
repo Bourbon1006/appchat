@@ -36,24 +36,24 @@ class ChatWebSocketHandler(
         val id: Long,
         val username: String,
         val nickname: String?,
-        val avatar: String?,
-        val online: Boolean
+        val avatarUrl: String?,
+        val isOnline: Boolean
     )
 
     data class FriendRequestDTO(
         val id: Long,
-        val sender: UserDTO,
-        val receiver: UserDTO,
+        val sender: UserStatusDTO,
+        val receiver: UserStatusDTO,
         val status: String,
         val timestamp: LocalDateTime
     )
 
-    private fun User.toDTO() = UserDTO(
+    private fun User.toStatusDTO() = UserStatusDTO(
         id = id,
         username = username,
         nickname = nickname,
-        avatar = avatar,
-        online = online
+        avatarUrl = avatarUrl,
+        isOnline = isOnline
     )
 
     private fun Message.toDTO() = MessageDTO(
@@ -71,8 +71,8 @@ class ChatWebSocketHandler(
 
     private fun FriendRequest.toDTO() = FriendRequestDTO(
         id = id,
-        sender = sender.toDTO(),
-        receiver = receiver.toDTO(),
+        sender = sender.toStatusDTO(),
+        receiver = receiver.toStatusDTO(),
         status = status.name,
         timestamp = timestamp
     )
@@ -127,8 +127,8 @@ class ChatWebSocketHandler(
                             id = onlineUser.id,
                             username = onlineUser.username,
                             nickname = onlineUser.nickname,
-                            avatar = onlineUser.avatar,
-                            online = true  // 确保在线状态正确
+                            avatarUrl = onlineUser.avatarUrl,
+                            isOnline = true  // 确保在线状态正确
                         )
                     }
                 
@@ -139,19 +139,19 @@ class ChatWebSocketHandler(
                 ))))
 
                 // 广播新用户上线通知给其他用户
-                val newUserStatus = UserStatusDTO(
-                    id = user.id,
-                    username = user.username,
-                    nickname = user.nickname,
-                    avatar = user.avatar,
-                    online = true
+                val userInfo = mapOf(
+                    "id" to user.id,
+                    "username" to user.username,
+                    "nickname" to user.nickname,
+                    "avatarUrl" to user.avatarUrl,
+                    "isOnline" to user.isOnline
                 )
                 
                 sessions.values.forEach { s ->
                     if (s != session) {
                         s.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
                             "type" to "userStatus",
-                            "user" to newUserStatus
+                            "user" to userInfo
                         ))))
                     }
                 }
@@ -404,8 +404,8 @@ class ChatWebSocketHandler(
                 id = user.id,
                 username = user.username,
                 nickname = user.nickname,
-                avatar = user.avatar,
-                online = false
+                avatarUrl = user.avatarUrl,
+                isOnline = false
             )
             
             val statusJson = objectMapper.writeValueAsString(mapOf(

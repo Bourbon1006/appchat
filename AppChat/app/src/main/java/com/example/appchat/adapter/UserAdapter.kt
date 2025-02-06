@@ -6,37 +6,36 @@ import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.example.appchat.R
-import com.example.appchat.model.User
+import com.example.appchat.model.UserDTO
 
 class UserAdapter(
-    private val currentUserId: Long,
-    private val onUserClick: (User) -> Unit
-) : RecyclerView.Adapter<UserAdapter.UserViewHolder>() {
+    private var users: List<UserDTO> = emptyList(),
+    private val onUserClick: (UserDTO) -> Unit
+) : RecyclerView.Adapter<UserAdapter.ViewHolder>() {
     
-    private val users = mutableListOf<User>()
-
-    fun updateUsers(newUsers: List<User>) {
-        users.clear()
-        users.addAll(newUsers)
+    fun updateUsers(newUsers: List<UserDTO>) {
+        users = newUsers
         notifyDataSetChanged()
     }
 
-    fun updateUserStatus(updatedUser: User) {
-        val index = users.indexOfFirst { it.id == updatedUser.id }
-        if (index != -1) {
-            users[index] = updatedUser
-            notifyItemChanged(index)
+    fun updateUserStatus(updatedUser: UserDTO) {
+        val position = users.indexOfFirst { it.id == updatedUser.id }
+        if (position != -1) {
+            users = users.toMutableList().apply {
+                this[position] = updatedUser
+            }
+            notifyItemChanged(position)
         }
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): UserViewHolder {
-        return UserViewHolder(
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+        return ViewHolder(
             LayoutInflater.from(parent.context)
                 .inflate(R.layout.item_user, parent, false)
         )
     }
 
-    override fun onBindViewHolder(holder: UserViewHolder, position: Int) {
+    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val user = users[position]
         holder.bind(user)
         holder.itemView.setOnClickListener { onUserClick(user) }
@@ -44,11 +43,11 @@ class UserAdapter(
 
     override fun getItemCount() = users.size
 
-    class UserViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+    class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val userName: TextView = itemView.findViewById(R.id.userName)
         private val userStatus: TextView = itemView.findViewById(R.id.userStatus)
 
-        fun bind(user: User) {
+        fun bind(user: UserDTO) {
             userName.text = user.username
             userStatus.text = if (user.isOnline) "在线" else "离线"
             userStatus.setTextColor(

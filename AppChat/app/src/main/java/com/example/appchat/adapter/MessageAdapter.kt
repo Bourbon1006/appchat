@@ -15,6 +15,7 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.CheckBox
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
@@ -22,7 +23,10 @@ import androidx.appcompat.app.AlertDialog
 import androidx.core.content.FileProvider
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
+import com.bumptech.glide.load.engine.DiskCacheStrategy
+import com.bumptech.glide.request.RequestOptions
 import com.example.appchat.ImagePreviewActivity
+import com.example.appchat.MainActivity
 import com.example.appchat.R
 import com.example.appchat.VideoPreviewActivity
 import com.example.appchat.db.ChatDatabase
@@ -32,6 +36,7 @@ import com.example.appchat.util.CustomLongClickListener
 import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import android.media.MediaMetadataRetriever
 
 class MessageAdapter(
     private val context: Context,
@@ -44,6 +49,8 @@ class MessageAdapter(
     private val messages = mutableListOf<ChatMessage>()
     private val chatDatabase = ChatDatabase(context)
     private var highlightedPosition: Int = -1
+    private var isMultiSelectMode = false
+    private val selectedMessages = mutableSetOf<Long>()
 
     init {
         // 加载本地消息
@@ -122,39 +129,42 @@ class MessageAdapter(
         notifyDataSetChanged()
     }
 
-    fun removeMessage(messageId: Long) {
-        try {
-            println("Starting to remove message: $messageId")
-            
-            // 先找到要删除的消息位置
-            val position = messages.indexOfFirst { it.id == messageId }
-            if (position != -1) {
-                // 从内存中删除
-                messages.removeAt(position)
-                // 立即通知视图更新
-                notifyItemRemoved(position)
-                println("✅ Message removed from adapter at position: $position")
-                
-                // 然后从数据库中删除
-                chatDatabase.deleteMessage(messageId)
-                
-                // 验证消息是否已被删除
-                if (!chatDatabase.isMessageExists(messageId)) {
-                    println("✅ Message successfully deleted from local database: $messageId")
-                } else {
-                    println("⚠️ Message still exists in database after deletion: $messageId")
-                }
-            } else {
-                println("⚠️ Message not found in adapter: $messageId")
+    fun removeMessageCompletely(messageId: Long) {
+        // 从内存中移除消息
+        val iterator = messages.iterator()
+        while (iterator.hasNext()) {
+            val message = iterator.next()
+            if (message.id == messageId) {
+                iterator.remove()
+                break
             }
-            
-            // 通知数据集可能发生变化
-            notifyDataSetChanged()
-            
-        } catch (e: Exception) {
-            e.printStackTrace()
-            println("❌ Error removing message: ${e.message}")
         }
+        
+        // 从本地数据库中完全删除消息
+        chatDatabase.deleteMessage(messageId)
+        
+        notifyDataSetChanged()
+    }
+
+    fun removeMessage(messageId: Long) {
+        // 从内存中移除消息
+        val iterator = messages.iterator()
+        while (iterator.hasNext()) {
+            val message = iterator.next()
+            if (message.id == messageId) {
+                iterator.remove()
+                break
+            }
+        }
+        
+        // 在本地数据库中标记消息为当前用户已删除
+        if (currentChatType == "private") {
+            chatDatabase.markMessageAsDeleted(messageId, currentUserId)
+        } else {
+            chatDatabase.deleteMessage(messageId)  // 群聊消息直接删除
+        }
+        
+        notifyDataSetChanged()
     }
 
     fun loadLocalMessages(): List<ChatMessage> {
@@ -202,7 +212,9 @@ class MessageAdapter(
         return messages.mapIndexedNotNull { index, message ->
             if (message.content.contains(query, ignoreCase = true)) {
                 Pair(message, index)
-            } else null
+            } else {
+                null
+            }
         }
     }
 
@@ -228,19 +240,34 @@ class MessageAdapter(
         }
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MessageViewHolder {
-        val layout = if (viewType == VIEW_TYPE_MY_MESSAGE) {
-            R.layout.item_message_sent
-        } else {
-            R.layout.item_message_received
+    fun setMultiSelectMode(enabled: Boolean) {
+        isMultiSelectMode = enabled
+        if (!enabled) {
+            selectedMessages.clear()
         }
-        
-        return MessageViewHolder(
-            LayoutInflater.from(parent.context)
-                .inflate(layout, parent, false),
-            currentUserId,
-            onMessageDelete
-        )
+        notifyDataSetChanged()
+    }
+
+    fun getSelectedMessages(): Set<Long> = selectedMessages.toSet()
+
+    fun removeMessages(messageIds: Set<Long>) {
+        val iterator = messages.iterator()
+        while (iterator.hasNext()) {
+            val message = iterator.next()
+            if (messageIds.contains(message.id)) {
+                iterator.remove()
+            }
+        }
+        notifyDataSetChanged()
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MessageViewHolder {
+        val layout = when (viewType) {
+            VIEW_TYPE_MY_MESSAGE -> R.layout.item_message_sent
+            else -> R.layout.item_message_received
+        }
+        val view = LayoutInflater.from(parent.context).inflate(layout, parent, false)
+        return MessageViewHolder(view, currentUserId, onMessageDelete)
     }
 
     override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
@@ -265,12 +292,14 @@ class MessageAdapter(
         private val currentUserId: Long,
         private val onMessageDelete: (Long) -> Unit
     ) : RecyclerView.ViewHolder(itemView) {
+        private val messageContainer: View = itemView.findViewById(R.id.messageContainer)
         private val messageText: TextView = itemView.findViewById(R.id.messageText)
         private val timeText: TextView = itemView.findViewById(R.id.timeText)
-        private val senderName: TextView = itemView.findViewById(R.id.senderName)
-        private val messageContainer: View = itemView.findViewById(R.id.messageContainer)
         private val fileContainer: View? = itemView.findViewById(R.id.fileContainer)
         private val fileIcon: ImageView? = itemView.findViewById(R.id.fileIcon)
+        private val playIcon: ImageView? = itemView.findViewById(R.id.playIcon)
+        private val avatarImage: ImageView = itemView.findViewById(R.id.messageAvatar)
+        private val checkbox: CheckBox = itemView.findViewById(R.id.messageCheckbox)
         
         init {
             // 在 messageContainer 上设置长按监听器
@@ -306,11 +335,26 @@ class MessageAdapter(
         }
 
         fun bind(message: ChatMessage, previousMessage: ChatMessage?) {
+            messageText.text = message.content
+
+            // 加载发送者头像
+            val avatarUrl = "${itemView.context.getString(R.string.server_url_format).format(
+                itemView.context.getString(R.string.server_ip),
+                itemView.context.getString(R.string.server_port)
+            )}/api/users/${message.senderId}/avatar"
+            
+            Glide.with(itemView.context)
+                .load(avatarUrl)
+                .apply(RequestOptions.circleCropTransform())
+                .placeholder(R.drawable.default_avatar)
+                .error(R.drawable.default_avatar)
+                .into(avatarImage)
+
             // 如果是时间戳消息，只显示时间
             if (message.type == MessageType.TIME) {
                 messageText.visibility = View.GONE
                 fileContainer?.visibility = View.GONE
-                timeText?.apply {
+                timeText.apply {
                     visibility = View.VISIBLE
                     text = message.timestamp?.let { formatTime(it) } ?: ""
                 }
@@ -319,10 +363,9 @@ class MessageAdapter(
 
             // 正常消息的处理
             messageText.visibility = View.VISIBLE
-            senderName.visibility = View.GONE
             
             // 处理时间戳显示逻辑
-            timeText?.visibility = View.GONE  // 默认隐藏时间戳，由时间戳消息来显示
+            timeText.visibility = View.GONE  // 默认隐藏时间戳，由时间戳消息来显示
 
             when (message.type) {
                 MessageType.TEXT -> {
@@ -334,52 +377,52 @@ class MessageAdapter(
                     val extension = message.content.substringAfterLast('.', "").lowercase()
                     when {
                         isImageFile(extension) -> {
-                            messageText.text = message.content
+                            messageText.visibility = View.GONE
                             fileIcon?.visibility = View.VISIBLE
                             fileContainer?.visibility = View.VISIBLE
-                            // 加载缩略图
                             message.fileUrl?.let { url ->
                                 Glide.with(itemView.context)
                                     .load(url)
-                                    .override(200, 200)  // 增大缩略图尺寸
+                                    .override(400, 400)
                                     .centerCrop()
                                     .into(fileIcon!!)
-                            }
-                            
-                            // 点击打开图片预览
-                            fileContainer?.setOnClickListener {
-                                message.fileUrl?.let { url ->
-                                    val intent = Intent(itemView.context, ImagePreviewActivity::class.java)
-                                    intent.putExtra("imageUrl", url)
-                                    itemView.context.startActivity(intent)
-                                }
                             }
                         }
                         isVideoFile(extension) -> {
-                            messageText.text = "🎥 ${message.content}"
-                            
-                            // 加载视频缩略图
-                            message.fileUrl?.let { url ->
-                                Glide.with(itemView.context)
-                                    .asBitmap()
-                                    .load(url)
-                                    .override(200, 200)
-                                    .centerCrop()
-                                    .into(fileIcon!!)
-                                
-                                // 添加播放图标覆盖
-                                val playIcon = itemView.findViewById<ImageView>(R.id.playIcon)
-                                playIcon?.visibility = View.VISIBLE
-                            }
-                            
+                            messageText.visibility = View.GONE
                             fileIcon?.visibility = View.VISIBLE
-                            
-                            // 点击播放视频
-                            fileContainer?.setOnClickListener {
-                                message.fileUrl?.let { url ->
-                                    val intent = Intent(itemView.context, VideoPreviewActivity::class.java)
-                                    intent.putExtra("videoUrl", url)
-                                    itemView.context.startActivity(intent)
+                            fileContainer?.visibility = View.VISIBLE
+                            playIcon?.visibility = View.VISIBLE
+
+                            // 使用 MediaMetadataRetriever 获取本地视频缩略图
+                            message.fileUrl?.let { url ->
+                                // 先下载视频文件到缓存目录
+                                val cacheDir = itemView.context.cacheDir
+                                val videoFile = File(cacheDir, message.content)
+                                
+                                if (!videoFile.exists()) {
+                                    // 如果视频文件不存在，显示默认缩略图
+                                    Glide.with(itemView.context)
+                                        .load(R.drawable.video_placeholder)
+                                        .override(400, 400)
+                                        .centerCrop()
+                                        .into(fileIcon!!)
+                                } else {
+                                    try {
+                                        val retriever = MediaMetadataRetriever()
+                                        retriever.setDataSource(videoFile.absolutePath)
+                                        val bitmap = retriever.getFrameAtTime(0)
+                                        retriever.release()
+
+                                        if (bitmap != null) {
+                                            fileIcon?.setImageBitmap(bitmap)
+                                        } else {
+                                            fileIcon?.setImageResource(R.drawable.video_placeholder)
+                                        }
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                        fileIcon?.setImageResource(R.drawable.video_placeholder)
+                                    }
                                 }
                             }
                         }
@@ -402,26 +445,7 @@ class MessageAdapter(
 
                     fileContainer?.let { container ->
                         container.setOnClickListener {
-                            message.fileUrl?.let { url -> 
-                                when {
-                                    isImageFile(extension) -> {
-                                        // 打开图片预览
-                                        val intent = Intent(itemView.context, ImagePreviewActivity::class.java)
-                                        intent.putExtra("imageUrl", url)
-                                        itemView.context.startActivity(intent)
-                                    }
-                                    isVideoFile(extension) -> {
-                                        // 打开视频预览
-                                        val intent = Intent(itemView.context, VideoPreviewActivity::class.java)
-                                        intent.putExtra("videoUrl", url)
-                                        itemView.context.startActivity(intent)
-                                    }
-                                    else -> {
-                                        // 下载并打开文件
-                                        downloadAndOpenFile(url, message.content)
-                                    }
-                                }
-                            }
+                            handleFileClick(message)
                         }
                     }
                 }
@@ -443,28 +467,46 @@ class MessageAdapter(
                 }
             }
 
-            // 移除或修改这部分代码，让原始背景生效
-            messageContainer.setBackgroundResource(
-                if (adapterPosition == highlightedPosition) {
-                    R.drawable.bg_message_highlighted
-                } else {
-                    // 不要在这里设置背景，让布局文件中的背景生效
-                    0  // 0 表示不设置背景
-                }
-            )
+            // 处理多选模式
+            checkbox.visibility = if (isMultiSelectMode) View.VISIBLE else View.GONE
+            checkbox.isChecked = message.id?.let { selectedMessages.contains(it) } ?: false
 
-            // 或者改为：
-            if (adapterPosition == highlightedPosition) {
-                messageContainer.setBackgroundResource(R.drawable.bg_message_highlighted)
-            } else {
-                // 根据消息类型设置不同的背景
-                val backgroundRes = if (message.senderId == currentUserId) {
-                    R.drawable.bg_message_sent
-                } else {
-                    R.drawable.bg_message_received
+            // 设置点击监听器
+            itemView.setOnClickListener {
+                if (isMultiSelectMode) {
+                    message.id?.let { messageId ->
+                        toggleMessageSelection(messageId)
+                    }
                 }
-                messageContainer.setBackgroundResource(backgroundRes)
             }
+
+            // 设置长按监听器
+            itemView.setOnLongClickListener {
+                if (!isMultiSelectMode) {
+                    (context as MainActivity).enterMultiSelectMode()
+                    message.id?.let { messageId ->
+                        toggleMessageSelection(messageId)
+                    }
+                }
+                true
+            }
+
+            // 设置 CheckBox 的点击监听器
+            checkbox.setOnClickListener {
+                message.id?.let { messageId ->
+                    toggleMessageSelection(messageId)
+                }
+            }
+        }
+
+        private fun toggleMessageSelection(messageId: Long) {
+            if (selectedMessages.contains(messageId)) {
+                selectedMessages.remove(messageId)
+            } else {
+                selectedMessages.add(messageId)
+            }
+            notifyItemChanged(adapterPosition)
+            (context as MainActivity).updateSelectedCount(selectedMessages.size)
         }
 
         private fun isImageFile(extension: String): Boolean {
@@ -472,10 +514,7 @@ class MessageAdapter(
         }
 
         private fun isVideoFile(extension: String): Boolean {
-            return extension.lowercase() in listOf(
-                "mp4", "3gp", "mkv", "webm", "avi", 
-                "mov", "wmv", "flv"
-            )
+            return extension in listOf("mp4", "3gp", "mkv", "webm")
         }
 
         private fun isPdfFile(extension: String): Boolean {
@@ -486,145 +525,111 @@ class MessageAdapter(
             return extension in listOf("doc", "docx")
         }
 
-        private fun downloadAndOpenFile(url: String, filename: String) {
-            try {
-                println("Starting download: $url")
-                val downloadDir = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                    "chat_files"
-                ).apply { mkdirs() }
-
-                val file = File(downloadDir, filename)
-                
-                // 如果文件已存在且大小不为0，直接打开
-                if (file.exists() && file.length() > 0) {
-                    println("File already exists, opening directly")
-                    openFile(file)
-                    return
+        private fun handleFileClick(message: ChatMessage) {
+            val extension = message.content.substringAfterLast('.', "").lowercase()
+            message.fileUrl?.let { url ->
+                when {
+                    isImageFile(extension) -> {
+                        // 显示保存图片的选项
+                        AlertDialog.Builder(itemView.context)
+                            .setTitle("图片操作")
+                            .setItems(arrayOf("查看", "保存")) { _, which ->
+                                when (which) {
+                                    0 -> {
+                                        // 查看图片
+                                        val intent = Intent(itemView.context, ImagePreviewActivity::class.java)
+                                        intent.putExtra("imageUrl", url)
+                                        itemView.context.startActivity(intent)
+                                    }
+                                    1 -> {
+                                        // 保存图片
+                                        downloadAndSaveFile(url, message.content, "image/*")
+                                    }
+                                }
+                            }
+                            .show()
+                    }
+                    isVideoFile(extension) -> {
+                        // 显示视频操作选项
+                        AlertDialog.Builder(itemView.context)
+                            .setTitle("视频操作")
+                            .setItems(arrayOf("播放", "保存")) { _, which ->
+                                when (which) {
+                                    0 -> {
+                                        // 播放视频
+                                        val intent = Intent(itemView.context, VideoPreviewActivity::class.java)
+                                        intent.putExtra("videoUrl", url)
+                                        itemView.context.startActivity(intent)
+                                    }
+                                    1 -> {
+                                        // 保存视频
+                                        downloadAndSaveFile(url, message.content, "video/*")
+                                    }
+                                }
+                            }
+                            .show()
+                    }
+                    else -> {
+                        // 其他文件直接下载
+                        downloadAndSaveFile(url, message.content, "*/*")
+                    }
                 }
+            }
+        }
 
+        private fun downloadAndSaveFile(url: String, filename: String, mimeType: String) {
+            try {
+                val context = itemView.context
+                val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                
                 val request = DownloadManager.Request(Uri.parse(url))
+                    .setTitle(filename)
+                    .setDescription("正在下载...")
                     .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    .setDestinationUri(Uri.fromFile(file))
-                    .setTitle("下载文件")
-                    .setDescription(filename)
-                    .setMimeType(getMimeType(filename))
-                    .setAllowedOverMetered(true)
-                    .setAllowedOverRoaming(true)
-
-                val downloadManager = itemView.context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                val downloadId = downloadManager.enqueue(request)
-
-                println("Download started with ID: $downloadId")
+                    .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename)
+                    .setMimeType(mimeType)
 
                 // 注册下载完成的广播接收器
-                val onComplete = object : BroadcastReceiver() {
-                    override fun onReceive(context: Context, intent: Intent) {
-                        val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
-                        if (id == downloadId) {
-                            try {
-                                context.unregisterReceiver(this)
+                val downloadReceiver = object : BroadcastReceiver() {
+                    override fun onReceive(context: Context?, intent: Intent?) {
+                        val downloadId = intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
+                        if (downloadId != -1L) {
+                            val query = DownloadManager.Query().setFilterById(downloadId)
+                            val cursor = downloadManager.query(query)
+                            
+                            if (cursor.moveToFirst()) {
+                                val columnIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                                val status = cursor.getInt(columnIndex)
                                 
-                                // 检查下载是否成功
-                                val query = DownloadManager.Query().setFilterById(downloadId)
-                                val cursor = downloadManager.query(query)
-                                if (cursor.moveToFirst()) {
-                                    val status = cursor.getInt(cursor.getColumnIndex(DownloadManager.COLUMN_STATUS))
-                                    if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                                        println("Download successful, opening file")
-                                        openFile(file)
-                                    } else {
-                                        println("Download failed with status: $status")
+                                when (status) {
+                                    DownloadManager.STATUS_SUCCESSFUL -> {
+                                        Toast.makeText(context, "文件已保存到下载目录", Toast.LENGTH_SHORT).show()
+                                    }
+                                    DownloadManager.STATUS_FAILED -> {
                                         Toast.makeText(context, "下载失败", Toast.LENGTH_SHORT).show()
                                     }
                                 }
-                                cursor.close()
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                                println("Error handling download completion: ${e.message}")
                             }
+                            cursor.close()
                         }
+                        context?.unregisterReceiver(this)
                     }
                 }
 
-                // 使用新的注册方式，指定接收器不导出
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    itemView.context.registerReceiver(
-                        onComplete,
-                        IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
-                        Context.RECEIVER_NOT_EXPORTED
-                    )
-                } else {
-                    itemView.context.registerReceiver(
-                        onComplete,
-                        IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
-                    )
-                }
-
-                Toast.makeText(itemView.context, "开始下载: $filename", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                e.printStackTrace()
-                println("Download error: ${e.message}")
-                Toast.makeText(itemView.context, "下载失败: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        private fun openFile(file: File) {
-            try {
-                val uri = FileProvider.getUriForFile(
-                    itemView.context,
-                    "${itemView.context.packageName}.fileprovider",
-                    file
+                // 注册广播接收器
+                context.registerReceiver(
+                    downloadReceiver,
+                    IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Context.RECEIVER_NOT_EXPORTED else 0
                 )
-                
-                // 对于 PDF 文件特别处理
-                val mimeType = getMimeType(file.name)
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, mimeType)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)  // 添加这个标志
-                }
 
-                // 检查是否有应用可以处理此意图
-                if (intent.resolveActivity(itemView.context.packageManager) != null) {
-                    itemView.context.startActivity(intent)
-                } else {
-                    Toast.makeText(
-                        itemView.context,
-                        "请安装 PDF 阅读器应用",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
+                // 开始下载
+                downloadManager.enqueue(request)
+                Toast.makeText(context, "开始下载...", Toast.LENGTH_SHORT).show()
+                
             } catch (e: Exception) {
                 e.printStackTrace()
-                Toast.makeText(
-                    itemView.context,
-                    "打开文件失败: ${e.message}",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-        }
-
-        private fun getMimeType(filename: String): String {
-            return when (filename.substringAfterLast('.', "").lowercase()) {
-                // 视频格式
-                "mp4" -> "video/mp4"
-                "3gp" -> "video/3gpp"
-                "mkv" -> "video/x-matroska"
-                "webm" -> "video/webm"
-                "avi" -> "video/x-msvideo"
-                "mov" -> "video/quicktime"
-                "wmv" -> "video/x-ms-wmv"
-                "flv" -> "video/x-flv"
-                // 现有的格式
-                "pdf" -> "application/pdf"
-                "doc", "docx" -> "application/msword"
-                "xls", "xlsx" -> "application/vnd.ms-excel"
-                "txt" -> "text/plain"
-                "jpg", "jpeg" -> "image/jpeg"
-                "png" -> "image/png"
-                "gif" -> "image/gif"
-                else -> "*/*"
+                Toast.makeText(itemView.context, "保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
 

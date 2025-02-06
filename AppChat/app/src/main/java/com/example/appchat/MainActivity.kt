@@ -67,6 +67,19 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import com.example.appchat.adapter.SearchResultAdapter
+import com.bumptech.glide.Glide
+import com.bumptech.glide.request.RequestOptions
+import android.widget.ImageView
+import com.example.appchat.model.UpdateUserRequest
+import com.example.appchat.model.UserDTO
+import android.widget.TextView
+import android.os.Handler
+import android.os.Looper
+import com.bumptech.glide.load.engine.DiskCacheStrategy
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
+import android.content.Context.RECEIVER_NOT_EXPORTED
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webSocket: WebSocket
@@ -94,6 +107,8 @@ class MainActivity : AppCompatActivity() {
     private val FILE_PICK_REQUEST = 1
     private val STORAGE_PERMISSION_REQUEST = 2
     private val apiService = ApiClient.apiService
+    private var isMultiSelectMode = false
+    private val selectedMessages = mutableSetOf<Long>()
 
     private val filePickerLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -113,6 +128,35 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val avatarPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { uploadAvatar(it) }
+    }
+
+    private val avatarRefreshReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == "com.example.appchat.REFRESH_AVATAR") {
+                // 刷新头像
+                val toolbarAvatar = findViewById<ImageView>(R.id.toolbarAvatar)
+                val userId = UserPreferences.getUserId(this@MainActivity)
+                val avatarUrl = "${getString(R.string.server_url_format).format(
+                    getString(R.string.server_ip),
+                    getString(R.string.server_port)
+                )}/api/users/$userId/avatar?t=${System.currentTimeMillis()}"
+
+                Glide.with(this@MainActivity)
+                    .load(avatarUrl)
+                    .apply(RequestOptions.circleCropTransform())
+                    .skipMemoryCache(true)
+                    .diskCacheStrategy(DiskCacheStrategy.NONE)
+                    .placeholder(R.drawable.default_avatar)
+                    .error(R.drawable.default_avatar)
+                    .into(toolbarAvatar)
+            }
+        }
+    }
+
     private fun WebSocket.sendDebug(message: Any) {
         val json = gson.toJson(message)
         println("Sending: $json")
@@ -123,23 +167,51 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        toolbar = findViewById<Toolbar>(R.id.toolbar)
+        // 设置 Toolbar
+        val toolbar = findViewById<Toolbar>(R.id.toolbar)
         setSupportActionBar(toolbar)
-        title = "群聊"
+        supportActionBar?.apply {
+            setDisplayShowTitleEnabled(true)
+            title = "聊天"
+        }
+
+        // 加载头像
+        val toolbarAvatar = findViewById<ImageView>(R.id.toolbarAvatar)
+        val userId = UserPreferences.getUserId(this)
+        val avatarUrl = "${getString(R.string.server_url_format).format(
+            getString(R.string.server_ip),
+            getString(R.string.server_port)
+        )}/api/users/$userId/avatar?t=${System.currentTimeMillis()}"
+        
+        Glide.with(this)
+            .load(avatarUrl)
+            .apply(RequestOptions.circleCropTransform())
+            .skipMemoryCache(true)
+            .diskCacheStrategy(DiskCacheStrategy.NONE)
+            .placeholder(R.drawable.default_avatar)
+            .error(R.drawable.default_avatar)
+            .into(toolbarAvatar)
+
+        // 点击头像跳转到个人资料页面
+        toolbarAvatar.setOnClickListener {
+            startActivity(Intent(this, ProfileActivity::class.java))
+        }
 
         val bottomNavigation = findViewById<BottomNavigationView>(R.id.bottomNavigation)
         bottomNavigation.setOnItemSelectedListener { item ->
             when (item.itemId) {
-                R.id.action_group_chat -> {
+                R.id.nav_group -> {
+                    supportActionBar?.title = "群聊"
                     showGroupListDialog()
                     true
                 }
-                R.id.action_contacts -> {
+                R.id.nav_contacts -> {
+                    supportActionBar?.title = "联系人"
                     showContactsDialog()
                     true
                 }
-                R.id.action_logout -> {
-                    logout()
+                R.id.nav_profile -> {
+                    showProfileDialog()
                     true
                 }
                 else -> false
@@ -196,6 +268,14 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             })
+        }
+
+        // 注册广播接收器
+        val filter = IntentFilter("com.example.appchat.REFRESH_AVATAR")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(avatarRefreshReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(avatarRefreshReceiver, filter)
         }
     }
 
@@ -275,7 +355,7 @@ class MainActivity : AppCompatActivity() {
                             }
                             "userStatus" -> {
                                 wsMessage.user?.let { user ->
-                                    println("Processing user status message: ${user.username}(${user.isOnline})")
+                                    println("Processing user status message: ${user.username}(online=${user.isOnline})")
                                     updateUserStatus(user)
                                 }
                             }
@@ -338,92 +418,53 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private fun updateUserList(users: List<User>) {
+    private fun updateUserList(users: List<UserDTO>) {
         println("Received users update: ${users.map { "${it.username}(online=${it.isOnline})" }}")
         currentUserAdapter?.updateUsers(users)
     }
 
-    private fun updateUserStatus(user: User) {
-        println("Received user status update: ${user.username}(online=${user.isOnline})")
+    private fun updateUserStatus(user: UserDTO) {
+        println("Processing user status message: ${user.username}(online=${user.isOnline})")
         currentUserAdapter?.updateUserStatus(user)
     }
 
     private fun showContactsDialog() {
+        updateToolbarTitle("联系人")
         val dialog = AlertDialog.Builder(this)
             .setTitle("联系人")
-            .setView(R.layout.dialog_contacts)
             .create()
 
-        dialog.show()
+        val view = layoutInflater.inflate(R.layout.dialog_contacts, null)
+        val contactsList = view.findViewById<RecyclerView>(R.id.contactsList)
+        contactsList.layoutManager = LinearLayoutManager(this)
 
-        val contactsList = dialog.findViewById<RecyclerView>(R.id.contactsList)
         val adapter = ContactAdapter { contact ->
-            println("Contact clicked: ${contact.username}")
-            // 设置当前聊天对象
-            currentChatUserId = contact.id
-            currentChatGroupId = null
-            // 更新标题
-            title = "与 ${contact.username} 聊天中"
-            // 创建新的 MessageAdapter 实例
-            messageAdapter = MessageAdapter(
-                context = this,
-                currentUserId = UserPreferences.getUserId(this),
-                currentChatType = "private",
-                chatPartnerId = contact.id,
-                onMessageDelete = { messageId ->
-                    lifecycleScope.launch {
-                        try {
-                            println("🗑️ Starting message deletion process: $messageId")
-                            
-                            // 先从本地删除
-                            messageAdapter.removeMessage(messageId)
-                            println("✅ Local message deletion completed")
-                            
-                            // 然后从服务器删除
-                            val response = apiService.deleteMessage(messageId, UserPreferences.getUserId(this@MainActivity))
-                            if (response.isSuccessful) {
-                                println("✅ Server message deletion successful")
-                                Toast.makeText(this@MainActivity, "消息已删除", Toast.LENGTH_SHORT).show()
-                            } else {
-                                println("⚠️ Server deletion failed but local deletion succeeded: ${response.code()}")
-                            }
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                            println("❌ Error in deletion process: ${e.message}")
+            dialog.dismiss()
+            startPrivateChat(contact.id)
+        }
+        contactsList.adapter = adapter
+
+        // 加载联系人列表
+        apiService.getUserContacts(UserPreferences.getUserId(this))
+            .enqueue(object : Callback<List<UserDTO>> {
+                override fun onResponse(call: Call<List<UserDTO>>, response: Response<List<UserDTO>>) {
+                    if (response.isSuccessful) {
+                        response.body()?.let { users ->
+                            adapter.updateContacts(users)
                         }
                     }
                 }
-            )
-            messageList.adapter = messageAdapter
-            // 加载聊天记录
-            loadChatHistory(contactId = contact.id)
-            dialog.dismiss()
-        }
 
-        contactsList?.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
-            this.adapter = adapter
-        }
-
-        // 加载联系人列表
-        val userId = UserPreferences.getUserId(this)
-        ApiClient.apiService.getUserContacts(userId).enqueue(object : Callback<List<User>> {
-            override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
-                if (response.isSuccessful) {
-                    response.body()?.let { contacts ->
-                        adapter.updateContacts(contacts)
-                    }
+                override fun onFailure(call: Call<List<UserDTO>>, t: Throwable) {
+                    Toast.makeText(this@MainActivity, "加载联系人失败", Toast.LENGTH_SHORT).show()
                 }
-            }
+            })
 
-            override fun onFailure(call: Call<List<User>>, t: Throwable) {
-                Toast.makeText(this@MainActivity, "加载联系人失败", Toast.LENGTH_SHORT).show()
-            }
-        })
+        dialog.setView(view)
+        dialog.show()
     }
 
     private fun showSearchDialog() {
-        println("Opening search dialog")
         val dialog = AlertDialog.Builder(this)
             .setTitle("搜索用户")
             .create()
@@ -434,8 +475,7 @@ class MainActivity : AppCompatActivity() {
         val progressBar = view.findViewById<ProgressBar>(R.id.progressBar)
         val searchButton = view.findViewById<Button>(R.id.searchButton)
 
-        println("Setting up search adapter")
-        val adapter = SearchUserAdapter(UserPreferences.getUserId(this)) { user ->
+        val adapter = SearchUserAdapter(emptyList()) { user ->
             println("User selected: ${user.username}")
             webSocket.sendDebug(mapOf(
                 "type" to "FRIEND_REQUEST",
@@ -454,45 +494,26 @@ class MainActivity : AppCompatActivity() {
             if (keyword.isNotEmpty()) {
                 println("Performing search with keyword: $keyword")
                 progressBar.visibility = View.VISIBLE
-                adapter.updateUsers(emptyList()) // 清空之前的结果
-                ApiClient.apiService.searchUsers(keyword)
-                    .enqueue(object : Callback<List<User>> {
-                        override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
-                            println("Search API response code: ${response.code()}")
-                            println("Search API raw response: ${response.raw()}")
+                adapter.updateContacts(emptyList()) // 清空之前的结果
+                apiService.searchUsers(keyword)
+                    .enqueue(object : Callback<List<UserDTO>> {
+                        override fun onResponse(call: Call<List<UserDTO>>, response: Response<List<UserDTO>>) {
                             progressBar.visibility = View.GONE
                             if (response.isSuccessful) {
                                 response.body()?.let { users ->
-                                    println("Found ${users.size} users")
-                                    if (users.isEmpty()) {
-                                        Toast.makeText(this@MainActivity, "未找到匹配的用户", Toast.LENGTH_SHORT).show()
-                                    }
-                                    adapter.updateUsers(users)
-                                } ?: run {
-                                    println("Response body is null")
-                                    Toast.makeText(this@MainActivity, "搜索结果为空", Toast.LENGTH_SHORT).show()
+                                    adapter.updateContacts(users)
                                 }
                             } else {
-                                val errorBody = response.errorBody()?.string()
-                                println("Search API error: $errorBody")
-                                Toast.makeText(this@MainActivity, "搜索失败: ${response.code()}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this@MainActivity, "搜索失败", Toast.LENGTH_SHORT).show()
                             }
                         }
 
-                        override fun onFailure(call: Call<List<User>>, t: Throwable) {
-                            println("Search API failure: ${t.message}")
-                            t.printStackTrace()
+                        override fun onFailure(call: Call<List<UserDTO>>, t: Throwable) {
                             progressBar.visibility = View.GONE
-                            Toast.makeText(this@MainActivity, "网络错误: ${t.message}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
                         }
                     })
-            } else {
-                Toast.makeText(this@MainActivity, "请输入搜索关键词", Toast.LENGTH_SHORT).show()
             }
-        }
-
-        searchButton.setOnClickListener {
-            performSearch(searchInput.text.toString())
         }
 
         searchInput.setOnEditorActionListener { _, actionId, _ ->
@@ -502,6 +523,10 @@ class MainActivity : AppCompatActivity() {
             } else {
                 false
             }
+        }
+
+        searchButton.setOnClickListener {
+            performSearch(searchInput.text.toString())
         }
 
         dialog.setView(view)
@@ -547,8 +572,11 @@ class MainActivity : AppCompatActivity() {
         val createButton = view.findViewById<Button>(R.id.createButton)
 
         val adapter = ContactSelectionAdapter(
-            contacts = emptyList()
-        ) { _: User -> /* 这里不需要回调，使用 getSelectedContacts() 方法获取选中的联系人 */ }
+            contacts = emptyList(),
+            onContactClick = { selectedUser: UserDTO -> 
+                // 处理用户选择
+            }
+        )
 
         contactsList.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
@@ -557,8 +585,8 @@ class MainActivity : AppCompatActivity() {
 
         // 加载联系人列表
         ApiClient.apiService.getUserContacts(UserPreferences.getUserId(this))
-            .enqueue(object : Callback<List<User>> {
-                override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
+            .enqueue(object : Callback<List<UserDTO>> {
+                override fun onResponse(call: Call<List<UserDTO>>, response: Response<List<UserDTO>>) {
                     if (response.isSuccessful) {
                         response.body()?.let { contacts ->
                             adapter.updateContacts(contacts)
@@ -566,7 +594,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                override fun onFailure(call: Call<List<User>>, t: Throwable) {
+                override fun onFailure(call: Call<List<UserDTO>>, t: Throwable) {
                     Toast.makeText(this@MainActivity, "加载联系人失败", Toast.LENGTH_SHORT).show()
                 }
             })
@@ -594,7 +622,10 @@ class MainActivity : AppCompatActivity() {
                 .enqueue(object : Callback<Group> {
                     override fun onResponse(call: Call<Group>, response: Response<Group>) {
                         if (response.isSuccessful) {
-                            Toast.makeText(this@MainActivity, "群组创建成功", Toast.LENGTH_SHORT).show()
+                            response.body()?.let { group ->
+                                updateToolbarTitle(group.name)
+                                Toast.makeText(this@MainActivity, "群组创建成功", Toast.LENGTH_SHORT).show()
+                            }
                             dialog.dismiss()
                         } else {
                             Toast.makeText(this@MainActivity, "群组创建失败", Toast.LENGTH_SHORT).show()
@@ -612,6 +643,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showGroupListDialog() {
+        updateToolbarTitle("群聊")
         val dialog = AlertDialog.Builder(this)
             .setTitle("群组")
             .setView(R.layout.dialog_group_list)
@@ -628,12 +660,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         val adapter = GroupAdapter { group ->
-            // 设置当前聊天对象
             currentChatGroupId = group.id
             currentChatUserId = null
-            // 更新标题
             title = group.name
-            // 创建新的 MessageAdapter 实例
             messageAdapter = MessageAdapter(
                 context = this,
                 currentUserId = UserPreferences.getUserId(this),
@@ -664,8 +693,7 @@ class MainActivity : AppCompatActivity() {
                 }
             )
             messageList.adapter = messageAdapter
-            // 加载聊天记录
-            loadChatHistory(groupId = group.id)
+            loadMessages(groupId = group.id)
             dialog.dismiss()
         }
 
@@ -722,10 +750,18 @@ class MainActivity : AppCompatActivity() {
         val addMemberButton = view.findViewById<Button>(R.id.addMemberButton)
 
         val adapter = GroupMemberAdapter(
-            members = group.members,
+            members = group.members.map { member -> 
+                UserDTO(
+                    id = member.id,
+                    username = member.username,
+                    nickname = member.nickname,
+                    avatarUrl = member.avatarUrl,
+                    isOnline = member.isOnline
+                )
+            },
             currentUserId = UserPreferences.getUserId(this),
             isCreator = group.creator.id == UserPreferences.getUserId(this)
-        ) { user: User ->
+        ) { user ->
             if (group.creator.id == UserPreferences.getUserId(this)) {
                 showRemoveMemberConfirmDialog(group.id, user)
             }
@@ -744,12 +780,12 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun showRemoveMemberConfirmDialog(groupId: Long, user: User) {
+    private fun showRemoveMemberConfirmDialog(groupId: Long, user: UserDTO) {
         AlertDialog.Builder(this)
             .setTitle("移除成员")
             .setMessage("确定要将 ${user.username} 移出群聊吗？")
             .setPositiveButton("确定") { _, _ ->
-                ApiClient.apiService.removeGroupMember(groupId, user.id)
+                apiService.removeGroupMember(groupId, user.id)
                     .enqueue(object : Callback<Group> {
                         override fun onResponse(call: Call<Group>, response: Response<Group>) {
                             if (response.isSuccessful) {
@@ -777,17 +813,17 @@ class MainActivity : AppCompatActivity() {
         val contactsList = view.findViewById<RecyclerView>(R.id.contactsList)
 
         // 过滤掉已经在群里的联系人
-        ApiClient.apiService.getUserContacts(UserPreferences.getUserId(this))
-            .enqueue(object : Callback<List<User>> {
-                override fun onResponse(call: Call<List<User>>, response: Response<List<User>>) {
+        apiService.getUserContacts(UserPreferences.getUserId(this))
+            .enqueue(object : Callback<List<UserDTO>> {
+                override fun onResponse(call: Call<List<UserDTO>>, response: Response<List<UserDTO>>) {
                     if (response.isSuccessful) {
                         response.body()?.let { contacts ->
                             val availableContacts = contacts.filter { contact ->
                                 !group.members.any { it.id == contact.id }
                             }
                             
-                            val adapter = ContactSelectionAdapter(availableContacts) { selectedUser: User ->
-                                ApiClient.apiService.addGroupMember(group.id, selectedUser.id)
+                            val adapter = ContactSelectionAdapter(availableContacts) { selectedUser ->
+                                apiService.addGroupMember(group.id, selectedUser.id)
                                     .enqueue(object : Callback<Group> {
                                         override fun onResponse(call: Call<Group>, response: Response<Group>) {
                                             if (response.isSuccessful) {
@@ -812,7 +848,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                override fun onFailure(call: Call<List<User>>, t: Throwable) {
+                override fun onFailure(call: Call<List<UserDTO>>, t: Throwable) {
                     Toast.makeText(this@MainActivity, "加载联系人失败", Toast.LENGTH_SHORT).show()
                     dialog.dismiss()
                 }
@@ -822,64 +858,80 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun loadChatHistory(contactId: Long? = null, groupId: Long? = null) {
-        println("Loading chat history - contactId: $contactId, groupId: $groupId")
-        
-        // 先从本地加载消息
+    private fun loadMessages(userId: Long? = null, groupId: Long? = null) {
+        // 先从本地数据库加载消息
+        messageAdapter = MessageAdapter(
+            context = this,
+            currentUserId = UserPreferences.getUserId(this),
+            currentChatType = if (userId != null) "private" else "group",
+            chatPartnerId = userId ?: groupId ?: -1L,
+            onMessageDelete = { messageId ->
+                lifecycleScope.launch {
+                    try {
+                        val response = apiService.deleteMessage(messageId, UserPreferences.getUserId(this@MainActivity))
+                        if (response.isSuccessful) {
+                            messageAdapter.removeMessage(messageId)
+                            Toast.makeText(this@MainActivity, "消息已删除", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+        )
+
+        messageList.adapter = messageAdapter
         val localMessages = messageAdapter.loadLocalMessages()
-        if (localMessages.isNotEmpty()) {
-            println("✅ Loaded ${localMessages.size} messages from local database")
-        }
+        println("✅ Loaded ${localMessages.size} messages from local database")
 
         // 然后从服务器获取最新消息
         val currentUserId = UserPreferences.getUserId(this)
         
-        if (contactId != null) {
-            // 加载私聊消息
-            println("Loading private messages between $currentUserId and $contactId")
-            ApiClient.apiService.getPrivateMessages(currentUserId, contactId)
-                .enqueue(object : Callback<List<ChatMessage>> {
-                    override fun onResponse(call: Call<List<ChatMessage>>, response: Response<List<ChatMessage>>) {
-                        if (response.isSuccessful) {
-                            response.body()?.let { messages ->
-                                println("✅ Received ${messages.size} messages from server")
-                                // 更新本地消息
-                                messageAdapter.updateMessages(messages)
+        when {
+            userId != null -> {
+                // 加载私聊消息
+                println("Loading private messages between $currentUserId and $userId")
+                apiService.getPrivateMessages(currentUserId, userId)
+                    .enqueue(object : Callback<List<ChatMessage>> {
+                        override fun onResponse(call: Call<List<ChatMessage>>, response: Response<List<ChatMessage>>) {
+                            if (response.isSuccessful) {
+                                response.body()?.let { messages ->
+                                    println("✅ Received ${messages.size} messages from server")
+                                    messageAdapter.updateMessages(messages)
+                                }
                             }
-                        } else {
-                            println("❌ Failed to load messages from server: ${response.code()}")
                         }
-                    }
 
-                    override fun onFailure(call: Call<List<ChatMessage>>, t: Throwable) {
-                        println("❌ Network error: ${t.message}")
-                    }
-                })
-        } else if (groupId != null) {
-            // 加载群聊消息
-            ApiClient.apiService.getGroupMessages(groupId)
-                .enqueue(object : Callback<List<ChatMessage>> {
-                    override fun onResponse(call: Call<List<ChatMessage>>, response: Response<List<ChatMessage>>) {
-                        if (response.isSuccessful) {
-                            response.body()?.let { messages ->
-                                println("✅ Received ${messages.size} messages from server")
-                                // 更新本地消息
-                                messageAdapter.updateMessages(messages)
+                        override fun onFailure(call: Call<List<ChatMessage>>, t: Throwable) {
+                            println("❌ Network error: ${t.message}")
+                        }
+                    })
+            }
+            groupId != null -> {
+                // 加载群聊消息
+                apiService.getGroupMessages(groupId)
+                    .enqueue(object : Callback<List<ChatMessage>> {
+                        override fun onResponse(call: Call<List<ChatMessage>>, response: Response<List<ChatMessage>>) {
+                            if (response.isSuccessful) {
+                                response.body()?.let { messages ->
+                                    println("✅ Received ${messages.size} messages from server")
+                                    messageAdapter.updateMessages(messages)
+                                }
                             }
-                        } else {
-                            println("❌ Failed to load messages from server: ${response.code()}")
                         }
-                    }
 
-                    override fun onFailure(call: Call<List<ChatMessage>>, t: Throwable) {
-                        println("❌ Network error: ${t.message}")
-                    }
-                })
+                        override fun onFailure(call: Call<List<ChatMessage>>, t: Throwable) {
+                            println("❌ Network error: ${t.message}")
+                        }
+                    })
+            }
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        // 取消注册广播接收器
+        unregisterReceiver(avatarRefreshReceiver)
         webSocket.close(1000, "Activity destroyed")
     }
 
@@ -888,18 +940,68 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        // 在多选模式下显示删除按钮，隐藏其他按钮
+        menu.findItem(R.id.action_search)?.isVisible = !isMultiSelectMode
+        menu.findItem(R.id.action_more)?.isVisible = !isMultiSelectMode
+        menu.findItem(R.id.action_clear_chat)?.apply {
+            isVisible = isMultiSelectMode
+            setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)  // 在工具栏上直接显示
+            setIcon(R.drawable.ic_delete)  // 设置删除图标
+        }
+        return super.onPrepareOptionsMenu(menu)
+    }
+
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
-            R.id.action_search -> {
-                showSearchDialog()
-                true
-            }
+            // 搜索相关
             R.id.action_search_messages -> {
                 showSearchMessagesDialog()
                 true
             }
+            R.id.action_search_users -> {
+                showSearchUsersDialog()
+                true
+            }
+
+            // 更多菜单项
+            R.id.menu_profile -> {
+                showProfileDialog()
+                true
+            }
+            R.id.menu_group_chat -> {
+                showCreateGroupDialog()
+                true
+            }
+            R.id.menu_contacts -> {
+                showContactsDialog()
+                true
+            }
+            R.id.action_clear_chat -> {
+                showDeleteMessagesDialog()
+                true
+            }
+            R.id.action_logout -> {
+                showLogoutConfirmDialog()
+                true
+            }
             else -> super.onOptionsItemSelected(item)
         }
+    }
+
+    private fun showLogoutConfirmDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("退出登录")
+            .setMessage("确定要退出登录吗？")
+            .setPositiveButton("确定") { _, _ ->
+                logout()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun updateToolbarTitle(title: String) {
+        findViewById<TextView>(R.id.toolbarTitle).text = title
     }
 
     private fun showFileChooser() {
@@ -952,60 +1054,83 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun sendFileMessage(fileDTO: FileDTO) {
+        try {
+            println("⭐ Preparing to send file message: ${fileDTO.filename}")
+            
+            val message = mutableMapOf<String, Any>(
+                "type" to "CHAT",
+                "senderId" to UserPreferences.getUserId(this),
+                "senderName" to UserPreferences.getUsername(this),
+                "content" to fileDTO.filename,
+                "messageType" to "FILE",
+                "fileUrl" to "${getString(R.string.server_url_format).format(
+                    getString(R.string.server_ip),
+                    getString(R.string.server_port)
+                )}${fileDTO.url}"
+            )
+
+            // 添加接收者或群组ID
+            currentChatGroupId?.let { groupId ->
+                message["groupId"] = groupId.toLong()
+                println("✅ Adding groupId: $groupId")
+            } ?: currentChatUserId?.let { userId ->
+                message["receiverId"] = userId.toLong()
+                println("✅ Adding receiverId: $userId")
+            } ?: run {
+                println("❌ No chat target specified")
+                return
+            }
+            
+            println("✅ Sending file message: $message")
+            webSocket.send(gson.toJson(message))
+        } catch (e: Exception) {
+            e.printStackTrace()
+            println("❌ Failed to send file message: ${e.message}")
+            Toast.makeText(this, "发送失败", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun uploadFile(uri: Uri) {
-        println("Starting file upload: $uri")
+        println("⭐ Starting file upload")
         val contentResolver = applicationContext.contentResolver
         val filename = getFileName(contentResolver, uri)
-        println("File name: $filename")
+        println("✅ File name: $filename")
         val inputStream = contentResolver.openInputStream(uri)
         val file = inputStream?.let { createTempFile(it, filename) }
         
         if (file != null) {
-            val mediaType = contentResolver.getType(uri)?.toMediaTypeOrNull()
-            val requestFile = file.asRequestBody(mediaType)
-            
-            val body = MultipartBody.Part.createFormData("file", filename, requestFile)
-            
-            ApiClient.apiService.uploadFile(body).enqueue(object : Callback<FileDTO> {
-                override fun onResponse(call: Call<FileDTO>, response: Response<FileDTO>) {
-                    if (response.isSuccessful) {
-                        response.body()?.let { fileDTO ->
-                            sendFileMessage(fileDTO)
-                        }
-                    } else {
-                        Toast.makeText(this@MainActivity, "文件上传失败", Toast.LENGTH_SHORT).show()
-                    }
-                }
+            try {
+                val mediaType = contentResolver.getType(uri)?.toMediaTypeOrNull()
+                val requestFile = file.asRequestBody(mediaType)
+                val body = MultipartBody.Part.createFormData("file", filename, requestFile)
+                val userId = UserPreferences.getUserId(this)
                 
-                override fun onFailure(call: Call<FileDTO>, t: Throwable) {
-                    Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
-                }
-            })
+                println("✅ Uploading file: $filename")
+                ApiClient.apiService.uploadFile(body).enqueue(object : Callback<FileDTO> {
+                    override fun onResponse(call: Call<FileDTO>, response: Response<FileDTO>) {
+                        if (response.isSuccessful) {
+                            response.body()?.let { fileDTO ->
+                                println("✅ File uploaded successfully: ${fileDTO.url}")
+                                sendFileMessage(fileDTO)
+                            }
+                        } else {
+                            println("❌ Upload failed: ${response.code()}")
+                            Toast.makeText(this@MainActivity, "文件上传失败", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    
+                    override fun onFailure(call: Call<FileDTO>, t: Throwable) {
+                        println("❌ Network error: ${t.message}")
+                        Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
+                    }
+                })
+            } catch (e: Exception) {
+                e.printStackTrace()
+                println("❌ Error preparing file upload: ${e.message}")
+                Toast.makeText(this, "文件处理失败", Toast.LENGTH_SHORT).show()
+            }
         }
-    }
-
-    private fun sendFileMessage(fileDTO: FileDTO) {
-        val message = mutableMapOf(
-            "type" to "CHAT",
-            "senderId" to UserPreferences.getUserId(this),
-            "senderName" to UserPreferences.getUsername(this),
-            "content" to fileDTO.filename,
-            "messageType" to "FILE",
-            "fileUrl" to "${getString(R.string.server_url_format).format(
-                getString(R.string.server_ip),
-                getString(R.string.server_port)
-            )}${fileDTO.url}"
-        )
-        
-        currentChatGroupId?.let { groupId ->
-            message["groupId"] = groupId
-        }
-        currentChatUserId?.let { userId ->
-            message["receiverId"] = userId
-        }
-        
-        println("Sending file message: $message")
-        webSocket.sendDebug(message)
     }
 
     private fun getFileName(contentResolver: ContentResolver, uri: Uri): String {
@@ -1048,20 +1173,16 @@ class MainActivity : AppCompatActivity() {
 
         val view = layoutInflater.inflate(R.layout.dialog_search_messages, null)
         val searchInput = view.findViewById<EditText>(R.id.searchInput)
-        val searchResultsList = view.findViewById<RecyclerView>(R.id.searchResultsList)
+        val resultsList = view.findViewById<RecyclerView>(R.id.searchResults)
+        resultsList.layoutManager = LinearLayoutManager(this)
 
-        searchResultsList.layoutManager = LinearLayoutManager(this)
-        
-        // 处理搜索动作
-        searchInput.setOnEditorActionListener { v, actionId, event ->
+        searchInput.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {
-                val query = v.text.toString()
-                if (query.isNotEmpty()) {
-                    searchMessages(query, searchResultsList) { position ->
-                        // 点击搜索结果时滚动到对应位置
-                        messageList.smoothScrollToPosition(position)
-                        dialog.dismiss()
-                    }
+                val query = searchInput.text.toString()
+                searchMessages(query, resultsList) { position ->
+                    dialog.dismiss()
+                    messageList.scrollToPosition(position)
+                    messageAdapter.highlightMessage(position)
                 }
                 true
             } else {
@@ -1081,6 +1202,298 @@ class MainActivity : AppCompatActivity() {
         val adapter = SearchResultAdapter(searchResults, onItemClick)
         
         resultsList.adapter = adapter
+    }
+
+    private fun showProfileDialog() {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("个人资料")
+            .create()
+
+        val view = layoutInflater.inflate(R.layout.dialog_profile, null)
+        val avatarImage = view.findViewById<ImageView>(R.id.avatarImage)
+        val nicknameInput = view.findViewById<EditText>(R.id.nicknameInput)
+        val saveButton = view.findViewById<Button>(R.id.saveButton)
+
+        // 加载当前头像和昵称
+        loadCurrentUserProfile(avatarImage, nicknameInput)
+
+        // 点击头像更换
+        avatarImage.setOnClickListener {
+            avatarPickerLauncher.launch("image/*")
+        }
+
+        // 保存按钮
+        saveButton.setOnClickListener {
+            val newNickname = nicknameInput.text.toString()
+            updateUserProfile(newNickname)
+            dialog.dismiss()
+        }
+
+        // 在头像更新成功后，也更新右上角的头像
+        val toolbarAvatar = findViewById<ImageView>(R.id.toolbarAvatar)
+        val userId = UserPreferences.getUserId(this)
+        val avatarUrl = "${getString(R.string.server_url_format).format(
+            getString(R.string.server_ip),
+            getString(R.string.server_port)
+        )}/api/users/$userId/avatar?t=${System.currentTimeMillis()}"
+        
+        Glide.with(this)
+            .load(avatarUrl)
+            .apply(RequestOptions.circleCropTransform())
+            .skipMemoryCache(true)
+            .diskCacheStrategy(DiskCacheStrategy.NONE)
+            .placeholder(R.drawable.default_avatar)
+            .error(R.drawable.default_avatar)
+            .into(toolbarAvatar)
+
+        dialog.setView(view)
+        dialog.show()
+    }
+
+    private fun updateUserProfile(nickname: String) {
+        val userId = UserPreferences.getUserId(this)
+        val request = UpdateUserRequest(nickname = nickname)
+        
+        apiService.updateUser(userId, request).enqueue(object : Callback<UserDTO> {
+            override fun onResponse(call: Call<UserDTO>, response: Response<UserDTO>) {
+                if (response.isSuccessful) {
+                    Toast.makeText(this@MainActivity, "个人资料更新成功", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this@MainActivity, "更新失败", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            override fun onFailure(call: Call<UserDTO>, t: Throwable) {
+                Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
+            }
+        })
+    }
+
+    private fun showDeleteMessagesDialog() {
+        val selectedMessages = messageAdapter.getSelectedMessages()
+        if (selectedMessages.isEmpty()) {
+            Toast.makeText(this, "请选择要删除的消息", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("删除消息")
+            .setMessage("确定要删除选中的 ${selectedMessages.size} 条消息吗？")
+            .setPositiveButton("确定") { _, _ ->
+                deleteSelectedMessages()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun deleteSelectedMessages() {
+        lifecycleScope.launch {
+            try {
+                messageAdapter.getSelectedMessages().forEach { messageId ->
+                    val response = apiService.deleteMessage(
+                        messageId, 
+                        UserPreferences.getUserId(this@MainActivity)
+                    )
+                    if (response.isSuccessful) {
+                        response.body()?.let { deleteResponse ->
+                            if (deleteResponse.isFullyDeleted) {
+                                messageAdapter.removeMessageCompletely(messageId)
+                            } else {
+                                messageAdapter.removeMessage(messageId)
+                            }
+                        }
+                    }
+                }
+                exitMultiSelectMode()
+                Toast.makeText(this@MainActivity, "删除成功", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "删除失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun enterMultiSelectMode() {
+        isMultiSelectMode = true
+        messageAdapter.setMultiSelectMode(true)
+        updateToolbarTitle("已选择 0 条消息")
+        invalidateOptionsMenu()
+    }
+
+    private fun exitMultiSelectMode() {
+        isMultiSelectMode = false
+        selectedMessages.clear()
+        messageAdapter.setMultiSelectMode(false)
+        updateToolbarTitle(getCurrentChatTitle())
+        invalidateOptionsMenu()
+    }
+
+    private fun getCurrentChatTitle(): String {
+        return when {
+            currentChatUserId != null -> "私聊"
+            currentChatGroupId != null -> "群聊"
+            else -> "聊天"
+        }
+    }
+
+    private fun loadCurrentUserProfile(avatarImage: ImageView, nicknameInput: EditText) {
+        val userId = UserPreferences.getUserId(this)
+        
+        // 加载头像
+        val avatarUrl = "${getString(R.string.server_url_format).format(
+            getString(R.string.server_ip),
+            getString(R.string.server_port)
+        )}/api/users/$userId/avatar"
+        
+        Glide.with(this)
+            .load(avatarUrl)
+            .apply(RequestOptions.circleCropTransform())
+            .placeholder(R.drawable.default_avatar)
+            .error(R.drawable.default_avatar)
+            .into(avatarImage)
+
+        // 加载用户信息
+        apiService.getUser(userId).enqueue(object : Callback<UserDTO> {
+            override fun onResponse(call: Call<UserDTO>, response: Response<UserDTO>) {
+                if (response.isSuccessful) {
+                    response.body()?.let { user ->
+                        nicknameInput.setText(user.nickname)
+                    }
+                }
+            }
+
+            override fun onFailure(call: Call<UserDTO>, t: Throwable) {
+                Toast.makeText(this@MainActivity, "加载用户信息失败", Toast.LENGTH_SHORT).show()
+            }
+        })
+    }
+
+    private fun showSearchUsersDialog() {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("搜索用户")
+            .create()
+
+        val view = layoutInflater.inflate(R.layout.dialog_search_users, null)
+        val searchInput = view.findViewById<EditText>(R.id.searchInput)
+        val resultsList = view.findViewById<RecyclerView>(R.id.searchResults)
+        resultsList.layoutManager = LinearLayoutManager(this)
+
+        searchInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                val query = searchInput.text.toString()
+                apiService.searchUsers(query).enqueue(object : Callback<List<UserDTO>> {
+                    override fun onResponse(call: Call<List<UserDTO>>, response: Response<List<UserDTO>>) {
+                        if (response.isSuccessful) {
+                            response.body()?.let { users ->
+                                val adapter = SearchUserAdapter(users) { user ->
+                                    dialog.dismiss()
+                                    startPrivateChat(user.id)
+                                }
+                                resultsList.adapter = adapter
+                            }
+                        }
+                    }
+
+                    override fun onFailure(call: Call<List<UserDTO>>, t: Throwable) {
+                        Toast.makeText(this@MainActivity, "搜索失败", Toast.LENGTH_SHORT).show()
+                    }
+                })
+                true
+            } else {
+                false
+            }
+        }
+
+        dialog.setView(view)
+        dialog.show()
+    }
+
+    private fun startPrivateChat(userId: Long) {
+        currentChatUserId = userId
+        currentChatGroupId = null
+        
+        // 获取用户信息并更新标题
+        apiService.getUser(userId).enqueue(object : Callback<UserDTO> {
+            override fun onResponse(call: Call<UserDTO>, response: Response<UserDTO>) {
+                if (response.isSuccessful) {
+                    response.body()?.let { user ->
+                        updateToolbarTitle("与 ${user.nickname ?: user.username} 聊天中")
+                    }
+                }
+            }
+            override fun onFailure(call: Call<UserDTO>, t: Throwable) {
+                updateToolbarTitle("私聊")
+            }
+        })
+        
+        loadMessages(userId = userId)
+    }
+
+    private fun uploadAvatar(uri: Uri) {
+        val contentResolver = applicationContext.contentResolver
+        val inputStream = contentResolver.openInputStream(uri)
+        val file = inputStream?.let { createTempFile(it, "avatar_temp") }
+
+        if (file != null) {
+            val mediaType = contentResolver.getType(uri)?.toMediaTypeOrNull()
+            val requestFile = file.asRequestBody(mediaType)
+            val body = MultipartBody.Part.createFormData("avatar", "avatar.jpg", requestFile)
+
+            val userId = UserPreferences.getUserId(this)
+            apiService.uploadAvatar(userId, body).enqueue(object : Callback<UserDTO> {
+                override fun onResponse(call: Call<UserDTO>, response: Response<UserDTO>) {
+                    if (response.isSuccessful) {
+                        // 清除缓存并强制从服务器获取新头像
+                        Glide.get(this@MainActivity).clearMemory()
+                        Thread {
+                            Glide.get(this@MainActivity).clearDiskCache()
+                        }.start()
+                        
+                        Handler(Looper.getMainLooper()).post {
+                            val avatarUrl = "${getString(R.string.server_url_format).format(
+                                getString(R.string.server_ip),
+                                getString(R.string.server_port)
+                            )}/api/users/$userId/avatar?t=${System.currentTimeMillis()}"
+                            
+                            val toolbarAvatar = findViewById<ImageView>(R.id.toolbarAvatar)
+                            Glide.with(this@MainActivity)
+                                .load(avatarUrl)
+                                .apply(RequestOptions.circleCropTransform())
+                                .skipMemoryCache(true)
+                                .diskCacheStrategy(DiskCacheStrategy.NONE)
+                                .placeholder(R.drawable.default_avatar)
+                                .error(R.drawable.default_avatar)
+                                .into(toolbarAvatar)
+                            
+                            Toast.makeText(this@MainActivity, "头像更新成功", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        Toast.makeText(this@MainActivity, "头像更新失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                override fun onFailure(call: Call<UserDTO>, t: Throwable) {
+                    Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
+                }
+            })
+        }
+    }
+
+    fun updateSelectedCount(count: Int) {
+        if (isMultiSelectMode) {
+            updateToolbarTitle("已选择 $count 条消息")
+            if (count == 0) {
+                exitMultiSelectMode()
+            }
+        }
+    }
+
+    // 添加返回键处理
+    override fun onBackPressed() {
+        if (isMultiSelectMode) {
+            exitMultiSelectMode()
+        } else {
+            super.onBackPressed()
+        }
     }
 
     companion object {

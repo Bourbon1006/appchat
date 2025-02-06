@@ -7,13 +7,13 @@ import android.widget.ImageButton
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.example.appchat.R
-import com.example.appchat.model.User
+import com.example.appchat.model.UserDTO
 
 class GroupMemberAdapter(
-    private val members: List<User>,
+    private val members: List<UserDTO>,
     private val currentUserId: Long,
     private val isCreator: Boolean,
-    private val onRemoveMember: (User) -> Unit
+    private val onMemberClick: (UserDTO) -> Unit
 ) : RecyclerView.Adapter<GroupMemberAdapter.ViewHolder>() {
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -39,7 +39,7 @@ class GroupMemberAdapter(
         }
 
         holder.removeButton.setOnClickListener {
-            onRemoveMember(member)
+            onMemberClick(member)
         }
     }
 

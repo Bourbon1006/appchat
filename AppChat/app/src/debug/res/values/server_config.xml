@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="server_ip">192.168.31.194</string>
+    <string name="server_ip">192.168.31.83</string>
     <string name="server_port">8080</string>
     <string name="server_url_format">http://%1$s:%2$s</string>
     <string name="server_ws_url_format">ws://%1$s:%2$s/chat</string>

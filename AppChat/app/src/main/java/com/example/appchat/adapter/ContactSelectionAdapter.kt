@@ -7,14 +7,14 @@ import android.widget.CheckBox
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.example.appchat.R
-import com.example.appchat.model.User
+import com.example.appchat.model.UserDTO
 
 class ContactSelectionAdapter(
-    private var contacts: List<User> = emptyList(),
-    private val onContactSelected: (User) -> Unit
+    private var contacts: List<UserDTO>,
+    private val onContactClick: (UserDTO) -> Unit
 ) : RecyclerView.Adapter<ContactSelectionAdapter.ViewHolder>() {
 
-    private val selectedContacts = mutableSetOf<User>()
+    private val selectedContacts = mutableSetOf<UserDTO>()
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val userName: TextView = view.findViewById(R.id.userName)
@@ -52,7 +52,7 @@ class ContactSelectionAdapter(
 
     override fun getItemCount() = contacts.size
 
-    fun updateContacts(newContacts: List<User>) {
+    fun updateContacts(newContacts: List<UserDTO>) {
         contacts = newContacts
         notifyDataSetChanged()
     }

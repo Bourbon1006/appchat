@@ -12,10 +12,16 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.multipart.MultipartFile
 import java.net.URLEncoder
+import java.io.File
+import java.nio.file.Files
+import org.springframework.beans.factory.annotation.Value
 
 @RestController
 @RequestMapping("/api/files")
-class FileController(private val fileService: FileService) {
+class FileController(
+    private val fileService: FileService,
+    @Value("\${file.upload.dir}") private val uploadDir: String
+) {
     private val logger = LoggerFactory.getLogger(FileController::class.java)
     
     data class ErrorResponse(
@@ -24,54 +30,99 @@ class FileController(private val fileService: FileService) {
     )
     
     @PostMapping("/upload")
-    fun uploadFile(@RequestParam("file") file: MultipartFile): ResponseEntity<Any> {
-        logger.info("Received file upload request: ${file.originalFilename}, size: ${file.size}")
+    fun uploadFile(
+        @RequestParam("file") file: MultipartFile
+    ): ResponseEntity<FileDTO> {
         return try {
-            val savedFile = fileService.saveFile(file)
-            logger.info("File uploaded successfully: ${savedFile.filename}")
-            ResponseEntity.ok(savedFile)
-        } catch (e: IllegalArgumentException) {
-            logger.error("Invalid file upload request", e)
-            ResponseEntity.badRequest()
-                .body(ErrorResponse(e.message ?: "Invalid request"))
+            println("⭐ Received file upload request: ${file.originalFilename}, size: ${file.size}")
+            val fileDTO = fileService.saveFile(file)
+            println("✅ File uploaded successfully: ${fileDTO.url}")
+            ResponseEntity.ok(fileDTO)
         } catch (e: Exception) {
-            logger.error("Error uploading file", e)
-            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ErrorResponse(
-                    message = "Failed to upload file",
-                    details = e.message
-                ))
+            e.printStackTrace()
+            println("❌ File upload failed: ${e.message}")
+            ResponseEntity.internalServerError().build()
         }
     }
     
-    @GetMapping("/download/{fileId}")
-    fun downloadFile(@PathVariable fileId: String): ResponseEntity<Resource> {
-        logger.info("Received file download request: $fileId")
-        return try {
-            val file = fileService.getFile(fileId)
-            fileService.markFileDownloaded(fileId)
-            
-            // 对文件名进行 URL 编码
-            val encodedFilename = URLEncoder.encode(file.filename, "UTF-8").replace("+", "%20")
-            
-            // 获取正确的 MIME 类型
-            val mimeType = when (file.filename.substringAfterLast('.', "").lowercase()) {
-                "jpg", "jpeg" -> MediaType.IMAGE_JPEG_VALUE
-                "png" -> MediaType.IMAGE_PNG_VALUE
-                "gif" -> MediaType.IMAGE_GIF_VALUE
-                "pdf" -> MediaType.APPLICATION_PDF_VALUE
-                else -> MediaType.APPLICATION_OCTET_STREAM_VALUE
+    @GetMapping("/download/{filename}")
+    fun downloadFile(@PathVariable filename: String): ResponseEntity<Resource> {
+        println("⭐ Received download request for file: $filename")
+        
+        // 确保 uploads 目录存在
+        val uploadDir = File("uploads").apply {
+            if (!exists()) {
+                mkdirs()
+            }
+        }
+        
+        val file = File(uploadDir, filename)
+        println("⭐ Looking for file at: ${file.absolutePath}")
+        
+        if (!file.exists()) {
+            println("❌ File not found: ${file.absolutePath}")
+            // 列出目录中的所有文件，帮助调试
+            println("⭐ Files in uploads directory:")
+            uploadDir.listFiles()?.forEach { f ->
+                println("  - ${f.name} (${f.length()} bytes)")
             }
             
-            ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(mimeType))
-                .header(
-                    HttpHeaders.CONTENT_DISPOSITION,
-                    "attachment; filename*=UTF-8''$encodedFilename"
-                )
-                .body(file.resource)
+            // 尝试查找不带扩展名的文件
+            val fileWithoutExt = uploadDir.listFiles()?.find { 
+                it.nameWithoutExtension == filename 
+            }
+            if (fileWithoutExt != null) {
+                println("✅ Found file without extension: ${fileWithoutExt.name}")
+                return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"${fileWithoutExt.name}\"")
+                    .body(FileSystemResource(fileWithoutExt))
+            }
+            
+            return ResponseEntity.notFound().build()
+        }
+
+        println("✅ File found, size: ${file.length()} bytes")
+        
+        val resource = FileSystemResource(file)
+        val mediaType = try {
+            val contentType = Files.probeContentType(file.toPath())
+            println("⭐ Content type: $contentType")
+            MediaType.parseMediaType(contentType ?: "application/octet-stream")
         } catch (e: Exception) {
-            logger.error("Error downloading file", e)
+            println("⚠️ Could not determine media type: ${e.message}")
+            MediaType.APPLICATION_OCTET_STREAM
+        }
+
+        return ResponseEntity.ok()
+            .contentType(mediaType)
+            .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"${file.name}\"")
+            .body(resource)
+    }
+
+    @GetMapping("/{filename}")
+    fun getFile(@PathVariable filename: String): ResponseEntity<Resource> {
+        return try {
+            val file = fileService.getFile(filename)
+            println("✅ Serving file: ${file.absolutePath}")
+            
+            // 根据文件扩展名设置正确的 Content-Type
+            val contentType = when (file.extension.lowercase()) {
+                "mp4" -> MediaType.parseMediaType("video/mp4")
+                "jpg", "jpeg" -> MediaType.IMAGE_JPEG
+                "png" -> MediaType.IMAGE_PNG
+                "gif" -> MediaType.IMAGE_GIF
+                "pdf" -> MediaType.APPLICATION_PDF
+                else -> MediaType.APPLICATION_OCTET_STREAM
+            }
+
+            ResponseEntity.ok()
+                .contentType(contentType)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"${file.name}\"")
+                .body(FileSystemResource(file))
+        } catch (e: Exception) {
+            e.printStackTrace()
+            println("❌ Failed to serve file: ${e.message}")
             ResponseEntity.notFound().build()
         }
     }

@@ -19,10 +19,11 @@ class User(
     
     var nickname: String? = null,
     
-    var avatar: String? = null,
+    @Column(name = "avatar_url")
+    var avatarUrl: String? = null,
     
     @Column(name = "is_online")
-    var online: Boolean = false,
+    var isOnline: Boolean = false,
 
     @JsonIgnore
     @ManyToMany

@@ -10,31 +10,36 @@ data class Message(
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
 
-    val content: String,
+    var content: String,
 
+    @Column(name = "timestamp")
     val timestamp: LocalDateTime = LocalDateTime.now(),
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne
     @JoinColumn(name = "sender_id")
     val sender: User,
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne
     @JoinColumn(name = "receiver_id")
     val receiver: User? = null,
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne
     @JoinColumn(name = "group_id")
     val group: Group? = null,
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
     val type: MessageType = MessageType.TEXT,
 
+    @Column(name = "file_url")
     val fileUrl: String? = null,
 
     @ElementCollection
-    @CollectionTable(name = "message_deleted_users")
-    val deletedForUsers: MutableSet<Long> = mutableSetOf()
+    @CollectionTable(
+        name = "message_deleted_users",
+        joinColumns = [JoinColumn(name = "message_id")]
+    )
+    @Column(name = "user_id")
+    var deletedForUsers: MutableSet<Long> = mutableSetOf()
 ) {
     constructor() : this(
         content = "",
