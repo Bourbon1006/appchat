@@ -594,7 +594,7 @@ class MessageAdapter(
                     override fun onReceive(context: Context?, intent: Intent?) {
                         val downloadId = intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
                         if (downloadId != -1L) {
-                            val query = DownloadManager.Query().setFilterById(downloadId)
+                            val query = downloadId?.let { DownloadManager.Query().setFilterById(it) }
                             val cursor = downloadManager.query(query)
                             
                             if (cursor.moveToFirst()) {

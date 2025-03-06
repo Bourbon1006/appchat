@@ -364,14 +364,17 @@ class MainActivity : AppCompatActivity() {
                                     Toast.makeText(this@MainActivity, error, Toast.LENGTH_SHORT).show()
                                 }
                             }
-                            "friendRequest" -> {
-                                wsMessage.friendRequest?.let { request ->
-                                    Toast.makeText(
-                                        this@MainActivity,
-                                        "收到来自 ${request.sender.username} 的好友请求",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                    showFriendRequestDialog(request)
+                            "pendingFriendRequests" -> {
+                                println("Processing pending friend requests message")
+                                wsMessage.requests?.let { requests ->
+                                    requests.forEach { request: FriendRequest ->
+                                        Toast.makeText(
+                                            this@MainActivity,
+                                            "收到来自 ${request.sender.username} 的好友请求",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                        showFriendRequestDialog(request)
+                                    }
                                 }
                             }
                             "friendRequestSent" -> {
@@ -541,6 +544,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showFriendRequestDialog(request: FriendRequest) {
+        println("Showing friend request dialog for: ${request.sender.username}")
         AlertDialog.Builder(this)
             .setTitle("好友请求")
             .setMessage("${request.sender.username} 想添加你为好友")

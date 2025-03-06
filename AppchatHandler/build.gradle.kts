@@ -34,6 +34,10 @@ dependencies {
     runtimeOnly("com.mysql:mysql-connector-j")
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
+    implementation("io.jsonwebtoken:jjwt:0.9.1") // 添加JWT库
+    implementation("javax.xml.bind:jaxb-api:2.3.1")
+    implementation("org.glassfish.jaxb:jaxb-runtime:2.3.1")
+    
 }
 
 kotlin {
