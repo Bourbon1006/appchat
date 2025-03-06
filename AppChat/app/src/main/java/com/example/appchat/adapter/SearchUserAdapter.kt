@@ -3,6 +3,7 @@ package com.example.appchat.adapter
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.example.appchat.R
@@ -21,6 +22,7 @@ class SearchUserAdapter(
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val nameText: TextView = view.findViewById(R.id.userName)
         val statusText: TextView = view.findViewById(R.id.userStatus)
+        val addFriendButton: Button = view.findViewById(R.id.addFriendButton)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -33,8 +35,8 @@ class SearchUserAdapter(
         val user = users[position]
         holder.nameText.text = user.nickname ?: user.username
         holder.statusText.text = if (user.isOnline) "在线" else "离线"
-        holder.itemView.setOnClickListener { onUserClick(user) }
+        holder.addFriendButton.setOnClickListener { onUserClick(user) }
     }
 
     override fun getItemCount() = users.size
-} 
+}

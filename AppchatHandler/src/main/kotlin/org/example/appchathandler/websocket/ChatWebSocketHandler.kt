@@ -1,7 +1,6 @@
-package org.example.appchathandler
+package org.example.appchathandler.websocket
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import org.example.appchathandler.dto.UserDTO
 import org.example.appchathandler.entity.Message
 import org.example.appchathandler.entity.MessageType
 import org.example.appchathandler.entity.FriendRequest
@@ -20,7 +19,6 @@ import com.fasterxml.jackson.databind.JsonNode
 import org.example.appchathandler.dto.WebSocketMessageDTO
 import org.example.appchathandler.entity.User
 import org.example.appchathandler.dto.MessageDTO
-import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.core.type.TypeReference
 
 @Component
@@ -47,7 +45,6 @@ class ChatWebSocketHandler(
         val status: String,
         val timestamp: LocalDateTime
     )
-
     private fun User.toStatusDTO() = UserStatusDTO(
         id = id,
         username = username,
@@ -55,7 +52,6 @@ class ChatWebSocketHandler(
         avatarUrl = avatarUrl,
         isOnline = isOnline
     )
-
     private fun Message.toDTO() = MessageDTO(
         id = id,
         content = content,
@@ -68,7 +64,6 @@ class ChatWebSocketHandler(
         type = type,
         fileUrl = fileUrl
     )
-
     private fun FriendRequest.toDTO() = FriendRequestDTO(
         id = id,
         sender = sender.toStatusDTO(),
@@ -76,9 +71,7 @@ class ChatWebSocketHandler(
         status = status.name,
         timestamp = timestamp
     )
-
     private val sessions = ConcurrentHashMap<Long, WebSocketSession>()
-
     sealed class WebSocketMessage {
         data class ChatMessage(
             val id: Long = 0,
@@ -92,7 +85,6 @@ class ChatWebSocketHandler(
             val timestamp: LocalDateTime = LocalDateTime.now(),
             val isRead: Boolean = false
         ) : WebSocketMessage()
-
         data class FileTransfer(
             val fileId: String,
             val fileName: String,
@@ -101,11 +93,9 @@ class ChatWebSocketHandler(
             val receiverId: Long?
         ) : WebSocketMessage()
     }
-
     private fun JsonNode.asLongOrNull(): Long? {
         return if (this.isNull) null else this.asLong()
     }
-
     override fun afterConnectionEstablished(session: WebSocketSession) {
         val userId = session.uri?.query?.substringAfter("userId=")?.toLongOrNull()
         if (userId != null) {
@@ -137,8 +127,6 @@ class ChatWebSocketHandler(
                     "type" to "users",
                     "users" to onlineUsers
                 ))))
-
-                // 广播新用户上线通知给其他用户
                 val userInfo = mapOf(
                     "id" to user.id,
                     "username" to user.username,
@@ -146,7 +134,6 @@ class ChatWebSocketHandler(
                     "avatarUrl" to user.avatarUrl,
                     "isOnline" to user.isOnline
                 )
-                
                 sessions.values.forEach { s ->
                     if (s != session) {
                         s.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
@@ -155,14 +142,15 @@ class ChatWebSocketHandler(
                         ))))
                     }
                 }
-
                 // 发送待处理的好友请求
                 val pendingRequests = friendRequestService.getPendingRequests(userId)
                 if (pendingRequests.isNotEmpty()) {
-                    session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
-                        "type" to "pendingFriendRequests",
-                        "requests" to pendingRequests.map { it.toDTO() }
-                    ))))
+                    pendingRequests.forEach { request ->
+                        session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
+                            "type" to "friendRequest",
+                            "friendRequest" to request.toDTO()
+                        ))))
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -170,7 +158,6 @@ class ChatWebSocketHandler(
             }
         }
     }
-
     override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
         val msg: Map<String, Any> = objectMapper.readValue(message.payload, 
             object : TypeReference<Map<String, Any>>() {})
@@ -186,7 +173,6 @@ class ChatWebSocketHandler(
                 val receiverId = (msg["receiverId"] as? Number)?.toLong()
                 val groupId = (msg["groupId"] as? Number)?.toLong()
                 val fileUrl = msg["fileUrl"] as? String
-
                 // 根据消息是否包含 groupId 来区分私聊和群聊
                 if (groupId != null) {
                     handleGroupMessage(
@@ -213,9 +199,7 @@ class ChatWebSocketHandler(
             "HANDLE_FRIEND_REQUEST" -> {
                 val requestId = msg["requestId"] as Number
                 val accept = msg["accept"] as Boolean
-                
                 val request = friendRequestService.handleFriendRequest(requestId.toLong(), accept)
-                
                 // 通知发送者请求结果
                 sessions[request.sender.id]?.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
                     "type" to "friendRequestResult",
@@ -249,7 +233,6 @@ class ChatWebSocketHandler(
             }
         }
     }
-
     private fun handleGroupMessage(
         content: String,
         senderId: Long,
@@ -266,7 +249,6 @@ class ChatWebSocketHandler(
                 type = type,
                 fileUrl = fileUrl
             )
-
             // 获取群组成员并发送消息
             val group = groupService.getGroup(groupId)
             group.members.forEach { member ->
@@ -286,7 +268,6 @@ class ChatWebSocketHandler(
             )))
         }
     }
-
     private fun handlePrivateMessage(
         content: String,
         senderId: Long,
@@ -303,9 +284,9 @@ class ChatWebSocketHandler(
                 type = type,
                 fileUrl = fileUrl
             )
-
             // 发送给接收者
             receiverId?.let { id ->
+                println("Sending message to receiver with ID: $id")
                 sessions[id]?.sendMessage(TextMessage(objectMapper.writeValueAsString(
                     WebSocketMessageDTO(
                         type = "message",
@@ -313,7 +294,6 @@ class ChatWebSocketHandler(
                     )
                 )))
             }
-
             // 发送给发送者（确认消息已发送）
             sessions[senderId]?.sendMessage(TextMessage(objectMapper.writeValueAsString(
                 WebSocketMessageDTO(
@@ -330,33 +310,37 @@ class ChatWebSocketHandler(
             )))
         }
     }
-
     private fun handleFriendRequest(message: Map<String, Any>, session: WebSocketSession) {
         try {
-            println("Processing friend request")
+            println("⭐ Processing friend request with message: $message")
             val senderId = message["senderId"] as Number
             val receiverId = message["receiverId"] as Number
-            
-            println("Sending friend request from $senderId to $receiverId")
+            println("✉️ Sending friend request from user $senderId to user $receiverId")
             val request = friendRequestService.sendFriendRequest(senderId.toLong(), receiverId.toLong())
-            println("Friend request created: $request")
-            
+            println("✅ Friend request created successfully: $request")
             // 通知接收者
+            // 无论接收者是否在线，都保存好友请求到数据库
+            // 如果接收者在线，立即发送通知
             sessions[receiverId.toLong()]?.let { receiverSession ->
-                println("Sending notification to receiver")
+                println("📨 Sending notification to receiver (userId: $receiverId)")
                 receiverSession.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
                     "type" to "friendRequest",
                     "friendRequest" to request.toDTO()
                 ))))
-            } ?: println("Receiver not online")
-
+                println("✅ Notification sent to receiver successfully")
+            }
+            // 如果接收者离线，请求会保存在数据库中，等待用户上线时通过getFriendRequests API获取
             // 通知发送者请求已发送
-            sessions[senderId.toLong()]?.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
-                "type" to "friendRequestSent",
-                "friendRequest" to request.toDTO()
-            ))))
+            sessions[senderId.toLong()]?.let { senderSession ->
+                println("📤 Sending confirmation to sender (userId: $senderId)")
+                senderSession.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
+                    "type" to "friendRequestSent",
+                    "friendRequest" to request.toDTO()
+                ))))
+                println("✅ Confirmation sent to sender successfully")
+            } ?: println("⚠️ Sender (userId: $senderId) is not online")
         } catch (e: Exception) {
-            println("Error handling friend request: ${e.message}")
+            println("❌ Error handling friend request: ${e.message}")
             e.printStackTrace()
             session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
                 "type" to "error",
@@ -364,15 +348,12 @@ class ChatWebSocketHandler(
             ))))
         }
     }
-
     private fun handleCreateGroup(message: Map<String, Any>, session: WebSocketSession) {
         val name = message["name"] as String
         val creatorId = message["creatorId"] as Number
         val memberIds = message["memberIds"] as List<Number>
-
         try {
             val groupDto = groupService.createGroup(name, creatorId.toLong(), memberIds.map { it.toLong() })
-            
             // 通知所有群成员
             groupDto.members.forEach { member ->
                 sessions[member.id]?.sendMessage(TextMessage(objectMapper.writeValueAsString(
@@ -391,13 +372,11 @@ class ChatWebSocketHandler(
             )))
         }
     }
-
     override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
         val userId = session.uri?.query?.substringAfter("userId=")?.toLongOrNull()
         if (userId != null) {
             sessions.remove(userId)
             userService.setUserOnline(userId, false)
-            
             // 广播用户下线通知
             val user = userService.getUser(userId)
             val offlineStatus = UserStatusDTO(
@@ -407,13 +386,11 @@ class ChatWebSocketHandler(
                 avatarUrl = user.avatarUrl,
                 isOnline = false
             )
-            
             val statusJson = objectMapper.writeValueAsString(mapOf(
                 "type" to "userStatus",
                 "user" to offlineStatus
             ))
-            
             sessions.values.forEach { it.sendMessage(TextMessage(statusJson)) }
         }
     }
-} 
+}

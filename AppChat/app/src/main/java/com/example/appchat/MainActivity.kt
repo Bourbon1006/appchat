@@ -316,10 +316,12 @@ class MainActivity : AppCompatActivity() {
             override fun onMessage(webSocket: WebSocket, text: String) {
                 runOnUiThread {
                     try {
-                        println("Received WebSocket message: $text")
+                        println("⭐ Received WebSocket message: $text")
                         val wsMessage = gson.fromJson(text, WebSocketMessage::class.java)
+                        println("📝 Parsed message type: ${wsMessage.type}")
                         when (wsMessage.type) {
                             "history" -> {
+                                println("📜 Processing history messages")
                                 wsMessage.messages?.forEach { message ->
                                     messageAdapter.addMessage(message)
                                 }
@@ -327,6 +329,7 @@ class MainActivity : AppCompatActivity() {
                             }
                             "message" -> {
                                 wsMessage.message?.let { message ->
+                                    println("💬 Processing new message: $message")
                                     // 检查消息是否属于当前聊天
                                     val shouldAdd = when {
                                         currentChatUserId != null -> {
@@ -337,6 +340,7 @@ class MainActivity : AppCompatActivity() {
                                         }
                                         else -> false
                                     }
+                                    println("✅ Should add message: $shouldAdd (currentChatUserId=$currentChatUserId, currentChatGroupId=$currentChatGroupId)")
                                     
                                     if (shouldAdd) {
                                         println("✅ Adding new message to local database: ${message.id}")
@@ -349,25 +353,28 @@ class MainActivity : AppCompatActivity() {
                             }
                             "users" -> {
                                 wsMessage.users?.let { users ->
-                                    println("Processing users message: ${users.map { "${it.username}(${it.isOnline})" }}")
+                                    println("👥 Processing users message: ${users.map { "${it.username}(${it.isOnline})" }}")
                                     updateUserList(users)
                                 }
                             }
                             "userStatus" -> {
                                 wsMessage.user?.let { user ->
-                                    println("Processing user status message: ${user.username}(online=${user.isOnline})")
+                                    println("👤 Processing user status message: ${user.username}(online=${user.isOnline})")
                                     updateUserStatus(user)
                                 }
                             }
                             "error" -> {
                                 wsMessage.error?.let { error ->
+                                    println("❌ Received error message: $error")
                                     Toast.makeText(this@MainActivity, error, Toast.LENGTH_SHORT).show()
                                 }
                             }
-                            "pendingFriendRequests" -> {
-                                println("Processing pending friend requests message")
+                            /*"pendingFriendRequests" -> {
+                                println("🤝 Processing pending friend requests message")
                                 wsMessage.requests?.let { requests ->
+                                    println("📬 Found ${requests.size} pending requests")
                                     requests.forEach { request: FriendRequest ->
+                                        println("📨 Processing request from ${request.sender.username} to ${request.receiver.username}")
                                         Toast.makeText(
                                             this@MainActivity,
                                             "收到来自 ${request.sender.username} 的好友请求",
@@ -376,12 +383,25 @@ class MainActivity : AppCompatActivity() {
                                         showFriendRequestDialog(request)
                                     }
                                 }
+                            }*/
+                            "friendRequest" -> {
+                                wsMessage.friendRequest?.let { request ->
+                                    println("🤝 Received new friend request from ${request.sender.username}")
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        "收到来自 ${request.sender.username} 的好友请求",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    showFriendRequestDialog(request)
+                                }
                             }
                             "friendRequestSent" -> {
+                                println("✈️ Friend request sent successfully")
                                 Toast.makeText(this@MainActivity, "好友请求已发送", Toast.LENGTH_SHORT).show()
                             }
                             "friendRequestResult" -> {
                                 wsMessage.friendRequest?.let { request ->
+                                    println("📫 Received friend request result: ${request.status} from ${request.receiver.username}")
                                     val message = when (request.status) {
                                         "ACCEPTED" -> "${request.receiver.username} 接受了你的好友请求"
                                         "REJECTED" -> "${request.receiver.username} 拒绝了你的好友请求"
@@ -392,6 +412,7 @@ class MainActivity : AppCompatActivity() {
                             }
                             "groupCreated" -> {
                                 wsMessage.group?.let { group ->
+                                    println("👥 New group created: ${group.name}")
                                     Toast.makeText(this@MainActivity, "群组 ${group.name} 创建成功", Toast.LENGTH_SHORT).show()
                                     // 立即显示群组列表对话框
                                     showGroupListDialog()
@@ -399,9 +420,13 @@ class MainActivity : AppCompatActivity() {
                             }
                             "groupMessage" -> {
                                 wsMessage.message?.let { message ->
+                                    println("👥 Received group message for group ${message.groupId}")
                                     if (message.groupId == currentChatGroupId) {
+                                        println("✅ Adding group message to current chat")
                                         messageAdapter.addMessage(message)
                                         messageList.scrollToPosition(messageAdapter.itemCount - 1)
+                                    } else {
+                                        println("⚠️ Group message not for current chat, skipping")
                                     }
                                 }
                             }
@@ -1371,6 +1396,13 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    private fun sendFriendRequest(receiverId: Long) {
+        webSocket.sendDebug(mapOf(
+            "type" to "FRIEND_REQUEST",
+            "senderId" to UserPreferences.getUserId(this),
+            "receiverId" to receiverId
+        ))
+    }
     private fun showSearchUsersDialog() {
         val dialog = AlertDialog.Builder(this)
             .setTitle("搜索用户")
@@ -1389,8 +1421,16 @@ class MainActivity : AppCompatActivity() {
                         if (response.isSuccessful) {
                             response.body()?.let { users ->
                                 val adapter = SearchUserAdapter(users) { user ->
-                                    dialog.dismiss()
-                                    startPrivateChat(user.id)
+                                    AlertDialog.Builder(this@MainActivity)
+                                        .setTitle("添加好友")
+                                        .setMessage("确定要添加 ${user.nickname ?: user.username} 为好友吗？")
+                                        .setPositiveButton("确定") { _, _ ->
+                                            sendFriendRequest(user.id)
+                                            Toast.makeText(this@MainActivity, "已发送好友请求", Toast.LENGTH_SHORT).show()
+                                            dialog.dismiss()
+                                        }
+                                        .setNegativeButton("取消", null)
+                                        .show()
                                 }
                                 resultsList.adapter = adapter
                             }

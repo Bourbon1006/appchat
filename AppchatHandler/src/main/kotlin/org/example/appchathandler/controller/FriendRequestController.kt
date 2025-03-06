@@ -39,7 +39,7 @@ class FriendRequestController(private val friendRequestService: FriendRequestSer
         status = status.name,
         timestamp = timestamp.toString()
     )
-
+    
     @PostMapping
     fun sendFriendRequest(
         @RequestParam senderId: Long,
@@ -52,7 +52,6 @@ class FriendRequestController(private val friendRequestService: FriendRequestSer
             ResponseEntity.badRequest().build()
         }
     }
-
     @PutMapping("/{requestId}")
     fun handleFriendRequest(
         @PathVariable requestId: Long,
@@ -75,4 +74,4 @@ class FriendRequestController(private val friendRequestService: FriendRequestSer
             ResponseEntity.badRequest().build()
         }
     }
-} 
+}

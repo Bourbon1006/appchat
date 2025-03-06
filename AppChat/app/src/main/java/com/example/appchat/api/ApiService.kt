@@ -29,16 +29,15 @@ interface ApiService {
 
     @GET("api/users/{userId}/contacts")
     fun getUserContacts(@Path("userId") userId: Long): Call<List<UserDTO>>
-
+    /*
     @POST("api/friend-requests")
     fun sendFriendRequest(@Body request: Map<String, Long>): Call<FriendRequest>
-
     @PUT("api/friend-requests/{requestId}")
     fun handleFriendRequest(
         @Path("requestId") requestId: Long,
         @Body request: Map<String, Boolean>
     ): Call<FriendRequest>
-
+    */
     @GET("/api/groups/user/{userId}")
     fun getUserGroups(@Path("userId") userId: Long): Call<List<Group>>
 
