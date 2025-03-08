@@ -143,9 +143,20 @@ class MessageService(
 
     @Transactional
     fun deleteMessage(messageId: Long, userId: Long) {
-        val message = messageRepository.findById(messageId).orElseThrow()
-        message.deletedForUsers.add(userId)
-        messageRepository.save(message)
+        val message = messageRepository.findById(messageId).orElseThrow {
+            IllegalArgumentException("Message with id $messageId not found")
+        }
+
+        // 确保 deletedForUsers 是可变的
+        if (message.deletedForUsers.add(userId)) {
+            messageRepository.save(message) // 只有在新增时才需要 save
+        }
+    }
+
+
+    @Transactional
+    fun deleteMessageCompletely(messageId: Long) {
+        messageRepository.isMessageDeletedForAllUsers(messageId)
     }
 
     @Transactional

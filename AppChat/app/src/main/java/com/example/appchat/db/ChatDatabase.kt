@@ -116,15 +116,16 @@ class ChatDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         }
     }
 
-    fun deleteMessage(messageId: Long) {
-        writableDatabase.delete(
+    fun deleteMessage(messageId: Long): Boolean {
+        val rowsAffected = writableDatabase.delete(
             TABLE_MESSAGES,
             "$COLUMN_MESSAGE_ID = ?",
             arrayOf(messageId.toString())
         )
+        return rowsAffected > 0 // 返回是否成功删除
     }
 
-    fun markMessageAsDeleted(messageId: Long, userId: Long) {
+    fun markMessageAsDeleted(messageId: Long, userId: Long): Boolean {
         val cursor = writableDatabase.query(
             TABLE_MESSAGES,
             arrayOf("deleted_by"),
@@ -155,6 +156,7 @@ class ChatDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
             )
         }
         cursor.close()
+        return true
     }
 
     fun isMessageDeletedForUser(messageId: Long, userId: Long): Boolean {

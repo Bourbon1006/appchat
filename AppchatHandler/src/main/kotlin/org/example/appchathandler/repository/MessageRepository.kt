@@ -114,4 +114,22 @@ interface MessageRepository : JpaRepository<Message, Long> {
         @Param("groupId") groupId: Long,
         @Param("userId") userId: Long
     ): List<Message>
-} 
+    @Query("""
+    SELECT CASE 
+        WHEN COUNT(m) = 0 THEN false
+        WHEN COALESCE(SIZE(m.deletedForUsers), 0) = 
+            CASE 
+                WHEN m.group IS NULL THEN 2  
+                ELSE (
+                    SELECT COUNT(gm) FROM Group g JOIN g.members gm WHERE g = m.group
+                )  
+            END 
+        THEN true 
+        ELSE false 
+    END
+    FROM Message m 
+    WHERE m.id = :messageId
+""")
+    fun isMessageDeletedForAllUsers(@Param("messageId") messageId: Long): Boolean
+
+}

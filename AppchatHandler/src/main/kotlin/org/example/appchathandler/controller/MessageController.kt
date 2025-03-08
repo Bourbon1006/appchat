@@ -17,12 +17,14 @@ import java.io.File
 import org.springframework.web.multipart.MultipartFile
 import java.util.UUID
 import org.springframework.beans.factory.annotation.Value
+import org.example.appchathandler.repository.MessageRepository
 
 @RestController
 @RequestMapping("/api/messages")
 @CrossOrigin
 class MessageController(
     private val messageService: MessageService,
+    private val messageRepository: MessageRepository,
     @Value("\${file.upload.dir}") private val uploadDir: String
 ) {
     @GetMapping("/group/{groupId}")
@@ -85,15 +87,20 @@ class MessageController(
         @PathVariable messageId: Long,
         @RequestParam userId: Long
     ): ResponseEntity<DeleteMessageResponse> {
-        // 检查消息是否存在
-        val message = messageService.findById(messageId)
-            ?: return ResponseEntity.notFound().build()
+        val message = messageService.findById(messageId) ?: return ResponseEntity.notFound().build()
 
-        // 标记消息为该用户已删除
-        val isFullyDeleted = messageService.markMessageAsDeleted(messageId, userId)
+        // 先标记消息为该用户已删除，并检查是否所有用户都已删除
+        val allDeleted = messageService.markMessageAsDeleted(messageId, userId)
 
-        return ResponseEntity.ok(DeleteMessageResponse(isFullyDeleted))
+        return if (allDeleted) {
+            // 如果所有用户都删除了这条消息，则彻底删除
+            messageService.deleteMessageCompletely(messageId)
+            ResponseEntity.ok(DeleteMessageResponse(true))
+        } else {
+            ResponseEntity.ok(DeleteMessageResponse(false))
+        }
     }
+
 
     @DeleteMapping("/all")
     fun deleteAllMessages(

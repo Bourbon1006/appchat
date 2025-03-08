@@ -7,10 +7,6 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.inputmethod.EditorInfo
-import android.widget.Button
-import android.widget.EditText
-import android.widget.ProgressBar
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -54,7 +50,6 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import android.widget.ImageButton
 import android.content.ContentResolver
 import android.provider.OpenableColumns
 import java.io.File
@@ -69,10 +64,8 @@ import kotlinx.coroutines.launch
 import com.example.appchat.adapter.SearchResultAdapter
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
-import android.widget.ImageView
 import com.example.appchat.model.UpdateUserRequest
 import com.example.appchat.model.UserDTO
-import android.widget.TextView
 import android.os.Handler
 import android.os.Looper
 import com.bumptech.glide.load.engine.DiskCacheStrategy
@@ -80,6 +73,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.IntentFilter
 import android.content.Context.RECEIVER_NOT_EXPORTED
+import android.widget.*
+import com.example.appchat.fragment.ContactsFragment
+import com.example.appchat.websocket.WebSocketManager
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webSocket: WebSocket
@@ -88,6 +84,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var messageList: RecyclerView
     private lateinit var messageAdapter: MessageAdapter
     private lateinit var toolbar: Toolbar
+    private var userId: Long = -1L  // 添加userId作为类成员变量
     private val gson = GsonBuilder()
         .registerTypeAdapter(LocalDateTime::class.java, LocalDateTimeAdapter())
         .registerTypeAdapter(MessageType::class.java, object : TypeAdapter<MessageType>() {
@@ -109,6 +106,8 @@ class MainActivity : AppCompatActivity() {
     private val apiService = ApiClient.apiService
     private var isMultiSelectMode = false
     private val selectedMessages = mutableSetOf<Long>()
+    private lateinit var deleteButton: ImageButton
+    private var deleteCallback: (() -> Unit)? = null
 
     private val filePickerLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -167,6 +166,13 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        // 初始化userId
+        userId = UserPreferences.getUserId(this)
+
+        // 初始化工具栏相关视图
+        deleteButton = findViewById(R.id.deleteButton)
+        deleteButton.visibility = View.GONE  // 默认隐藏
+
         // 设置 Toolbar
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
         setSupportActionBar(toolbar)
@@ -177,7 +183,6 @@ class MainActivity : AppCompatActivity() {
 
         // 加载头像
         val toolbarAvatar = findViewById<ImageView>(R.id.toolbarAvatar)
-        val userId = UserPreferences.getUserId(this)
         val avatarUrl = "${getString(R.string.server_url_format).format(
             getString(R.string.server_ip),
             getString(R.string.server_port)
@@ -207,7 +212,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 R.id.nav_contacts -> {
                     supportActionBar?.title = "联系人"
-                    showContactsDialog()
+                    val fragment = ContactsFragment()
+                    supportFragmentManager.beginTransaction()
+                        .replace(R.id.fragmentContainer, fragment)
+                        .commit()
                     true
                 }
                 R.id.nav_profile -> {
@@ -219,11 +227,14 @@ class MainActivity : AppCompatActivity() {
         }
         
         setupViews()
-        initWebSocket()
+        
+        // 初始化WebSocket连接
+        val serverUrl = "ws://${getString(R.string.server_ip)}:${getString(R.string.server_port)}/chat"
+        WebSocketManager.init(serverUrl, userId)
 
         messageAdapter = MessageAdapter(
             context = this,
-            currentUserId = UserPreferences.getUserId(this),
+            currentUserId = userId,
             currentChatType = "group",  // 默认为群聊
             chatPartnerId = -1L,  // 默认值，表示没有特定聊天对象
             onMessageDelete = { messageId ->
@@ -236,7 +247,7 @@ class MainActivity : AppCompatActivity() {
                         println("✅ Local message deletion completed")
                         
                         // 然后从服务器删除
-                        val response = apiService.deleteMessage(messageId, UserPreferences.getUserId(this@MainActivity))
+                        val response = apiService.deleteMessage(messageId, userId)
                         if (response.isSuccessful) {
                             println("✅ Server message deletion successful")
                             Toast.makeText(this@MainActivity, "消息已删除", Toast.LENGTH_SHORT).show()
@@ -280,21 +291,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupViews() {
-        messageInput = findViewById(R.id.messageInput)
-        sendButton = findViewById(R.id.sendButton)
         messageList = findViewById(R.id.messageList)
-
-        sendButton.setOnClickListener {
-            val message = messageInput.text.toString()
-            if (message.isNotEmpty()) {
-                sendMessage(message)
-            }
-        }
-
-        findViewById<ImageButton>(R.id.attachButton).setOnClickListener {
-            println("Attach button clicked")
-            showFileChooser()
-        }
     }
 
     private fun initWebSocket() {
@@ -1029,7 +1026,7 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun updateToolbarTitle(title: String) {
+    fun updateToolbarTitle(title: String) {
         findViewById<TextView>(R.id.toolbarTitle).text = title
     }
 
@@ -1451,7 +1448,7 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun startPrivateChat(userId: Long) {
+    fun startPrivateChat(userId: Long) {
         currentChatUserId = userId
         currentChatGroupId = null
         
@@ -1537,6 +1534,38 @@ class MainActivity : AppCompatActivity() {
             exitMultiSelectMode()
         } else {
             super.onBackPressed()
+        }
+    }
+
+    fun showMultiSelectActionBar() {
+        // 显示多选模式的工具栏
+        supportActionBar?.apply {
+            setDisplayHomeAsUpEnabled(true)
+            title = "选择要删除的消息"
+        }
+        
+        // 隐藏普通工具栏内容，显示删除按钮
+        findViewById<LinearLayout>(R.id.toolbarContent).visibility = View.GONE
+        deleteButton.visibility = View.VISIBLE
+    }
+
+    fun hideMultiSelectActionBar() {
+        // 隐藏多选模式的工具栏
+        supportActionBar?.apply {
+            setDisplayHomeAsUpEnabled(false)
+            title = "聊天"
+        }
+        
+        // 显示普通工具栏内容，隐藏删除按钮
+        findViewById<LinearLayout>(R.id.toolbarContent).visibility = View.VISIBLE
+        deleteButton.visibility = View.GONE
+    }
+
+    fun showDeleteButton(callback: () -> Unit) {
+        deleteButton.visibility = View.VISIBLE
+        deleteCallback = callback
+        deleteButton.setOnClickListener {
+            deleteCallback?.invoke()
         }
     }
 

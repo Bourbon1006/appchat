@@ -23,7 +23,6 @@ import java.awt.Color
 @SpringBootApplication
 @EnableJpaRepositories(basePackages = ["org.example.appchathandler.repository"])
 @EntityScan(basePackages = ["org.example.appchathandler.entity"])
-@ComponentScan(basePackages = ["org.example.appchathandler"])
 class AppchatHandlerApplication {
     @Value("\${file.upload.dir}")
     private lateinit var uploadDir: String

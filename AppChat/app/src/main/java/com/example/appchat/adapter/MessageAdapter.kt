@@ -45,12 +45,41 @@ class MessageAdapter(
     private val chatPartnerId: Long,  // 私聊对象ID或群组ID
     private val onMessageDelete: (Long) -> Unit
 ) : RecyclerView.Adapter<MessageAdapter.MessageViewHolder>() {
-    
+
     private val messages = mutableListOf<ChatMessage>()
     private val chatDatabase = ChatDatabase(context)
     private var highlightedPosition: Int = -1
     private var isMultiSelectMode = false
     private val selectedMessages = mutableSetOf<Long>()
+    private var itemLongClickListener: ((Int) -> Boolean)? = null
+
+    fun setOnItemLongClickListener(listener: (Int) -> Boolean) {
+        itemLongClickListener = listener
+    }
+
+    fun enterMultiSelectMode() {
+        isMultiSelectMode = true
+        println("✅ Entered multi-select mode")
+        notifyDataSetChanged()
+    }
+
+    fun exitMultiSelectMode() {
+        isMultiSelectMode = false
+        selectedMessages.clear()
+        notifyDataSetChanged()
+    }
+
+    fun toggleMessageSelection(messageId: Long) {
+        if (selectedMessages.contains(messageId)) {
+            selectedMessages.remove(messageId)
+        } else {
+            selectedMessages.add(messageId)
+        }
+        val position = messages.indexOfFirst { it.id == messageId }
+        if (position != -1) {
+            notifyItemChanged(position)
+        }
+    }
 
     init {
         // 加载本地消息
@@ -66,11 +95,11 @@ class MessageAdapter(
     fun addMessage(message: ChatMessage) {
         try {
             println("Adding message: ID=${message.id}, Type=${message.type}, Content=${message.content}")
-            
+
             // 计算新消息应该插入的位置
             val insertPosition = calculateInsertPosition(message)
             println("Calculated insert position: $insertPosition")
-            
+
             messages.add(insertPosition, message)
             if (message.type != MessageType.TIME) {
                 if (currentChatType == "private") {
@@ -88,7 +117,7 @@ class MessageAdapter(
                         groupId = chatPartnerId
                     )
                 }
-                
+
                 // 验证消息是否成功保存
                 message.id?.let { messageId ->
                     if (chatDatabase.isMessageExists(messageId)) {
@@ -111,8 +140,8 @@ class MessageAdapter(
         if (messages.isEmpty()) return 0
 
         // 找到第一个时间戳晚于新消息的位置
-        val insertPosition = messages.indexOfFirst { 
-            it.timestamp?.isAfter(newMessage.timestamp) == true 
+        val insertPosition = messages.indexOfFirst {
+            it.timestamp?.isAfter(newMessage.timestamp) == true
         }
 
         // 如果没找到，说明新消息是最新的，添加到末尾
@@ -139,15 +168,14 @@ class MessageAdapter(
                 break
             }
         }
-        
+
         // 从本地数据库中完全删除消息
         chatDatabase.deleteMessage(messageId)
-        
+
         notifyDataSetChanged()
     }
 
     fun removeMessage(messageId: Long) {
-        // 从内存中移除消息
         val iterator = messages.iterator()
         while (iterator.hasNext()) {
             val message = iterator.next()
@@ -156,15 +184,7 @@ class MessageAdapter(
                 break
             }
         }
-        
-        // 在本地数据库中标记消息为当前用户已删除
-        if (currentChatType == "private") {
-            chatDatabase.markMessageAsDeleted(messageId, currentUserId)
-        } else {
-            chatDatabase.deleteMessage(messageId)  // 群聊消息直接删除
-        }
-        
-        notifyDataSetChanged()
+        notifyDataSetChanged() // 确保 UI 更新
     }
 
     fun loadLocalMessages(): List<ChatMessage> {
@@ -173,7 +193,7 @@ class MessageAdapter(
         } else {
             chatDatabase.getGroupMessages(chatPartnerId)
         }
-        
+
         messages.clear()
         messages.addAll(localMessages)
         notifyDataSetChanged()
@@ -183,7 +203,7 @@ class MessageAdapter(
     fun updateMessages(newMessages: List<ChatMessage>) {
         // 清除现有消息
         messages.clear()
-        
+
         // 保存新消息到本地数据库
         newMessages.forEach { message ->
             if (message.type != MessageType.TIME) {
@@ -202,7 +222,7 @@ class MessageAdapter(
                 }
             }
         }
-        
+
         // 重新从本地数据库加载消息
         val localMessages = loadLocalMessages()
         println("✅ Updated local database with ${newMessages.size} messages, loaded ${localMessages.size} messages back")
@@ -221,11 +241,11 @@ class MessageAdapter(
     fun highlightMessage(position: Int) {
         // 清除之前的高亮
         clearHighlight()
-        
+
         // 设置新的高亮
         highlightedPosition = position
         notifyItemChanged(position)
-        
+
         // 3秒后取消高亮
         Handler(Looper.getMainLooper()).postDelayed({
             clearHighlight()
@@ -248,7 +268,9 @@ class MessageAdapter(
         notifyDataSetChanged()
     }
 
-    fun getSelectedMessages(): Set<Long> = selectedMessages.toSet()
+    fun getSelectedMessages(): List<Long> {
+        return selectedMessages.toList() // 返回选中的消息 ID 列表
+    }
 
     fun removeMessages(messageIds: Set<Long>) {
         val iterator = messages.iterator()
@@ -274,6 +296,34 @@ class MessageAdapter(
         val message = messages[position]
         val previousMessage = if (position > 0) messages[position - 1] else null
         holder.bind(message, previousMessage)
+        
+        // 根据多选模式设置复选框的可见性
+        holder.checkbox.visibility = if (isMultiSelectMode) View.VISIBLE else View.GONE
+        holder.checkbox.isChecked = selectedMessages.contains(message.id)
+        
+        // 设置点击监听器 - 只设置一次
+        holder.itemView.setOnClickListener {
+            if (isMultiSelectMode) {
+                message.id?.let { messageId ->
+                    toggleMessageSelection(messageId) // 切换选中状态
+                    println("点击事件，切换消息 ID: $messageId 的选中状态") // 监控日志
+                }
+            } else {
+                // 非多选模式下的点击处理
+                message.id?.let { messageId ->
+                    onMessageDelete(messageId)
+                }
+            }
+        }
+        
+        // 设置长按监听器 - 只设置一次
+        holder.itemView.setOnLongClickListener {
+            message.id?.let { messageId ->
+                // 通知外部长按事件发生
+                itemLongClickListener?.invoke(position)
+            }
+            true
+        }
     }
 
     override fun getItemCount() = messages.size
@@ -285,6 +335,10 @@ class MessageAdapter(
         } else {
             VIEW_TYPE_OTHER_MESSAGE
         }
+    }
+
+    override fun getItemId(position: Int): Long {
+        return messages[position].id ?: -1L
     }
 
     inner class MessageViewHolder(
@@ -299,8 +353,8 @@ class MessageAdapter(
         private val fileIcon: ImageView? = itemView.findViewById(R.id.fileIcon)
         private val playIcon: ImageView? = itemView.findViewById(R.id.playIcon)
         private val avatarImage: ImageView = itemView.findViewById(R.id.messageAvatar)
-        private val checkbox: CheckBox = itemView.findViewById(R.id.messageCheckbox)
-        
+        val checkbox: CheckBox = itemView.findViewById(R.id.messageCheckbox)
+
         init {
             // 在 messageContainer 上设置长按监听器
             itemView.findViewById<View>(R.id.messageContainer).setOnLongClickListener { view ->
@@ -342,7 +396,7 @@ class MessageAdapter(
                 itemView.context.getString(R.string.server_ip),
                 itemView.context.getString(R.string.server_port)
             )}/api/users/${message.senderId}/avatar"
-            
+
             Glide.with(itemView.context)
                 .load(avatarUrl)
                 .apply(RequestOptions.circleCropTransform())
@@ -363,7 +417,7 @@ class MessageAdapter(
 
             // 正常消息的处理
             messageText.visibility = View.VISIBLE
-            
+
             // 处理时间戳显示逻辑
             timeText.visibility = View.GONE  // 默认隐藏时间戳，由时间戳消息来显示
 
@@ -399,7 +453,7 @@ class MessageAdapter(
                                 // 先下载视频文件到缓存目录
                                 val cacheDir = itemView.context.cacheDir
                                 val videoFile = File(cacheDir, message.content)
-                                
+
                                 if (!videoFile.exists()) {
                                     // 如果视频文件不存在，显示默认缩略图
                                     Glide.with(itemView.context)
@@ -467,30 +521,6 @@ class MessageAdapter(
                 }
             }
 
-            // 处理多选模式
-            checkbox.visibility = if (isMultiSelectMode) View.VISIBLE else View.GONE
-            checkbox.isChecked = message.id?.let { selectedMessages.contains(it) } ?: false
-
-            // 设置点击监听器
-            itemView.setOnClickListener {
-                if (isMultiSelectMode) {
-                    message.id?.let { messageId ->
-                        toggleMessageSelection(messageId)
-                    }
-                }
-            }
-
-            // 设置长按监听器
-            itemView.setOnLongClickListener {
-                if (!isMultiSelectMode) {
-                    (context as MainActivity).enterMultiSelectMode()
-                    message.id?.let { messageId ->
-                        toggleMessageSelection(messageId)
-                    }
-                }
-                true
-            }
-
             // 设置 CheckBox 的点击监听器
             checkbox.setOnClickListener {
                 message.id?.let { messageId ->
@@ -505,8 +535,10 @@ class MessageAdapter(
             } else {
                 selectedMessages.add(messageId)
             }
-            notifyItemChanged(adapterPosition)
-            (context as MainActivity).updateSelectedCount(selectedMessages.size)
+            val position = messages.indexOfFirst { it.id == messageId }
+            if (position != -1) {
+                notifyItemChanged(position)
+            }
         }
 
         private fun isImageFile(extension: String): Boolean {
@@ -682,4 +714,4 @@ class MessageAdapter(
         private const val VIEW_TYPE_MY_MESSAGE = 1
         private const val VIEW_TYPE_OTHER_MESSAGE = 2
     }
-} 
+}
