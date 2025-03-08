@@ -7,6 +7,8 @@ import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.example.appchat.R
 import com.example.appchat.model.ChatMessage
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 class SearchResultAdapter(
     private val messages: List<Pair<ChatMessage, Int>>,  // 消息和其在原列表中的位置
@@ -27,9 +29,20 @@ class SearchResultAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val (message, originalPosition) = messages[position]
         holder.messageText.text = message.content
-        holder.timeText.text = message.timestamp.toString()
-        holder.itemView.setOnClickListener { onItemClick(originalPosition) }
+        holder.timeText.text = message.timestamp?.let { formatTime(it) }
+        
+        holder.itemView.setOnClickListener {
+            onItemClick(originalPosition)
+        }
     }
 
     override fun getItemCount() = messages.size
+
+    private fun formatTime(timestamp: LocalDateTime): String {
+        return try {
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(timestamp)
+        } catch (e: Exception) {
+            ""
+        }
+    }
 } 

@@ -205,11 +205,11 @@ class MainActivity : AppCompatActivity() {
         val bottomNavigation = findViewById<BottomNavigationView>(R.id.bottomNavigation)
         bottomNavigation.setOnItemSelectedListener { item ->
             when (item.itemId) {
-                R.id.nav_group -> {
+/*                R.id.nav_group -> {
                     supportActionBar?.title = "群聊"
                     showGroupListDialog()
                     true
-                }
+                }*/
                 R.id.nav_contacts -> {
                     supportActionBar?.title = "联系人"
                     val fragment = ContactsFragment()
@@ -489,7 +489,7 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun showSearchDialog() {
+    /*private fun showSearchDialog() {
         val dialog = AlertDialog.Builder(this)
             .setTitle("搜索用户")
             .create()
@@ -556,7 +556,7 @@ class MainActivity : AppCompatActivity() {
 
         dialog.setView(view)
         dialog.show()
-    }
+    }*/
 
     private fun logout() {
         UserPreferences.clear(this)
@@ -999,10 +999,10 @@ class MainActivity : AppCompatActivity() {
                 showCreateGroupDialog()
                 true
             }
-            R.id.menu_contacts -> {
+/*            R.id.menu_contacts -> {
                 showContactsDialog()
                 true
-            }
+            }*/
             R.id.action_clear_chat -> {
                 showDeleteMessagesDialog()
                 true

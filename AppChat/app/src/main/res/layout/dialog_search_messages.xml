@@ -9,7 +9,7 @@
         android:id="@+id/searchInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="输入搜索关键词"
+        android:hint="输入搜索内容"
         android:imeOptions="actionSearch"
         android:inputType="text"
         android:maxLines="1" />

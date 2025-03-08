@@ -10,14 +10,15 @@ import com.example.appchat.R
 import com.example.appchat.model.UserDTO
 
 class ContactSelectionAdapter(
-    private var contacts: List<UserDTO>,
-    private val onContactClick: (UserDTO) -> Unit
+    contacts: List<UserDTO> = emptyList(),
+    private val onContactClick: ((UserDTO) -> Unit)? = null
 ) : RecyclerView.Adapter<ContactSelectionAdapter.ViewHolder>() {
-
+    
+    private var contacts: List<UserDTO> = contacts
     private val selectedContacts = mutableSetOf<UserDTO>()
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-        val userName: TextView = view.findViewById(R.id.userName)
+        val username: TextView = view.findViewById(R.id.username)
         val checkbox: CheckBox = view.findViewById(R.id.checkbox)
     }
 
@@ -29,20 +30,25 @@ class ContactSelectionAdapter(
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val contact = contacts[position]
-        holder.userName.text = contact.username
+        holder.username.text = contact.username
         holder.checkbox.isChecked = selectedContacts.contains(contact)
 
+        // 设置点击事件
         holder.itemView.setOnClickListener {
-            if (selectedContacts.contains(contact)) {
-                selectedContacts.remove(contact)
+            if (onContactClick != null) {
+                onContactClick.invoke(contact)
             } else {
-                selectedContacts.add(contact)
+                holder.checkbox.isChecked = !holder.checkbox.isChecked
+                if (holder.checkbox.isChecked) {
+                    selectedContacts.add(contact)
+                } else {
+                    selectedContacts.remove(contact)
+                }
             }
-            notifyItemChanged(position)
         }
 
-        holder.checkbox.setOnClickListener {
-            if (holder.checkbox.isChecked) {
+        holder.checkbox.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
                 selectedContacts.add(contact)
             } else {
                 selectedContacts.remove(contact)
@@ -57,5 +63,7 @@ class ContactSelectionAdapter(
         notifyDataSetChanged()
     }
 
-    fun getSelectedContacts() = selectedContacts.toList()
+    fun getSelectedContacts(): List<UserDTO> {
+        return selectedContacts.toList()
+    }
 } 

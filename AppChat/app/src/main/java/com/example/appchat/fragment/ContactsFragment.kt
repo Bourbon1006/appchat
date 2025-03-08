@@ -12,6 +12,8 @@ import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.viewpager2.adapter.FragmentStateAdapter
+import androidx.viewpager2.widget.ViewPager2
 import com.example.appchat.ChatActivity
 import com.example.appchat.MainActivity
 import com.example.appchat.R
@@ -19,16 +21,15 @@ import com.example.appchat.adapter.ContactAdapter
 import com.example.appchat.api.ApiClient
 import com.example.appchat.model.UserDTO
 import com.example.appchat.util.UserPreferences
+import com.google.android.material.tabs.TabLayout
+import com.google.android.material.tabs.TabLayoutMediator
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
 
 class ContactsFragment : Fragment() {
-    private lateinit var contactsList: RecyclerView
-    private lateinit var progressBar: ProgressBar
-    private lateinit var searchInput: EditText
-    private lateinit var searchButton: Button
-    private lateinit var adapter: ContactAdapter
+    private lateinit var viewPager: ViewPager2
+    private lateinit var tabLayout: TabLayout
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -36,68 +37,37 @@ class ContactsFragment : Fragment() {
         savedInstanceState: Bundle?
     ): View? {
         val view = inflater.inflate(R.layout.fragment_contacts, container, false)
-
-        contactsList = view.findViewById(R.id.contactsList)
-        progressBar = view.findViewById(R.id.progressBar)
-        searchInput = view.findViewById(R.id.searchInput)
-        searchButton = view.findViewById(R.id.searchButton)
-
-        setupRecyclerView()
-        loadContacts()
-        setupSearchButton()
-
+        
+        viewPager = view.findViewById(R.id.viewPager)
+        tabLayout = view.findViewById(R.id.tabLayout)
+        
+        setupViewPager()
         return view
     }
 
-    private fun setupRecyclerView() {
-        adapter = ContactAdapter { contact ->
-            // 使用 Intent 启动 ChatActivity
-            val intent = Intent(requireContext(), ChatActivity::class.java).apply {
-                putExtra("receiver_id", contact.id)
-                putExtra("receiver_name", contact.username)
+    private fun setupViewPager() {
+        val adapter = ContactsPagerAdapter(this)
+        viewPager.adapter = adapter
+        
+        // 连接 TabLayout 和 ViewPager2
+        TabLayoutMediator(tabLayout, viewPager) { tab, position ->
+            tab.text = when (position) {
+                0 -> "好友"
+                1 -> "群组"
+                else -> ""
             }
-            startActivity(intent)
-        }
-        contactsList.apply {
-            layoutManager = LinearLayoutManager(context)
-            this.adapter = this@ContactsFragment.adapter
-        }
+        }.attach()
     }
+}
 
-    private fun loadContacts() {
-        progressBar.visibility = View.VISIBLE
-        ApiClient.apiService.getUserContacts(UserPreferences.getUserId(requireContext()))
-            .enqueue(object : Callback<List<UserDTO>> {
-                override fun onResponse(call: Call<List<UserDTO>>, response: Response<List<UserDTO>>) {
-                    progressBar.visibility = View.GONE
-                    if (response.isSuccessful) {
-                        response.body()?.let { users ->
-                            adapter.updateContacts(users)
-                        }
-                    }
-                }
+class ContactsPagerAdapter(fragment: Fragment) : FragmentStateAdapter(fragment) {
+    override fun getItemCount(): Int = 2
 
-                override fun onFailure(call: Call<List<UserDTO>>, t: Throwable) {
-                    progressBar.visibility = View.GONE
-                    Toast.makeText(context, "加载联系人失败", Toast.LENGTH_SHORT).show()
-                }
-            })
-    }
-
-    private fun setupSearchButton() {
-        searchButton.setOnClickListener {
-            val query = searchInput.text.toString().trim()
-            if (query.isNotEmpty()) {
-                // 实现搜索功能
-                searchUsers(query)
-            }
+    override fun createFragment(position: Int): Fragment {
+        return when (position) {
+            0 -> FriendsListFragment()
+            1 -> GroupListFragment()
+            else -> throw IllegalArgumentException("Invalid position $position")
         }
-    }
-
-    private fun searchUsers(query: String) {
-        progressBar.visibility = View.VISIBLE
-        // 这里需要实现搜索用户的API调用
-        // 暂时使用加载所有联系人的方式
-        loadContacts()
     }
 }

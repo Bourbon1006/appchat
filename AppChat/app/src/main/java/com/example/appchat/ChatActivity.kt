@@ -5,8 +5,10 @@ import android.content.ContentResolver
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.Toast
@@ -18,6 +20,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.appchat.adapter.MessageAdapter
+import com.example.appchat.adapter.SearchResultAdapter
 import com.example.appchat.api.ApiClient
 import com.example.appchat.model.ChatMessage
 import com.example.appchat.model.FileDTO
@@ -30,6 +33,8 @@ import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.InputStream
 import java.time.LocalDateTime
+import retrofit2.Callback
+import retrofit2.Response
 
 class ChatActivity : AppCompatActivity() {
     private lateinit var messagesList: RecyclerView
@@ -39,6 +44,7 @@ class ChatActivity : AppCompatActivity() {
     private lateinit var adapter: MessageAdapter
     private var receiverId: Long = 0
     private var receiverName: String = ""
+    private var chatType: String = "private"
     private var isMultiSelectMode = false
     private lateinit var deleteButton: ImageButton
 
@@ -56,6 +62,7 @@ class ChatActivity : AppCompatActivity() {
         // 获取Intent传递的参数
         receiverId = intent.getLongExtra("receiver_id", 0)
         receiverName = intent.getStringExtra("receiver_name") ?: ""
+        chatType = intent.getStringExtra("chat_type") ?: "private"
 
         // 设置Toolbar
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
@@ -88,7 +95,7 @@ class ChatActivity : AppCompatActivity() {
         adapter = MessageAdapter(
             context = this,
             currentUserId = UserPreferences.getUserId(this),
-            currentChatType = "private",
+            currentChatType = chatType,
             chatPartnerId = receiverId,
             onMessageDelete = { messageId ->
                 if (isMultiSelectMode) {
@@ -136,11 +143,7 @@ class ChatActivity : AppCompatActivity() {
 
     private fun setupSendButton() {
         sendButton.setOnClickListener {
-            val content = messageInput.text.toString().trim()
-            if (content.isNotEmpty()) {
-                sendMessage(content)
-                messageInput.text.clear()
-            }
+            sendMessage()
         }
     }
 
@@ -156,12 +159,30 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun loadChatHistory() {
-        ApiClient.apiService.getPrivateMessages(UserPreferences.getUserId(this), receiverId)
-            .enqueue(object : retrofit2.Callback<List<ChatMessage>> {
-                override fun onResponse(
-                    call: retrofit2.Call<List<ChatMessage>>,
-                    response: retrofit2.Response<List<ChatMessage>>
-                ) {
+        if (chatType == "group") {
+            // 加载群聊消息
+            ApiClient.apiService.getGroupMessages(receiverId)
+                .enqueue(object : Callback<List<ChatMessage>> {
+                    override fun onResponse(call: retrofit2.Call<List<ChatMessage>>, response: retrofit2.Response<List<ChatMessage>>) {
+                        if (response.isSuccessful) {
+                            response.body()?.let { messages ->
+                                adapter.updateMessages(messages)
+                                messagesList.scrollToPosition(adapter.itemCount - 1)
+                            }
+                        }
+                    }
+
+                    override fun onFailure(call: retrofit2.Call<List<ChatMessage>>, t: Throwable) {
+                        Toast.makeText(this@ChatActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
+                    }
+                })
+        } else {
+            // 加载私聊消息
+            ApiClient.apiService.getPrivateMessages(
+                UserPreferences.getUserId(this),
+                receiverId
+            ).enqueue(object : Callback<List<ChatMessage>> {
+                override fun onResponse(call: retrofit2.Call<List<ChatMessage>>, response: retrofit2.Response<List<ChatMessage>>) {
                     if (response.isSuccessful) {
                         response.body()?.let { messages ->
                             adapter.updateMessages(messages)
@@ -171,14 +192,21 @@ class ChatActivity : AppCompatActivity() {
                 }
 
                 override fun onFailure(call: retrofit2.Call<List<ChatMessage>>, t: Throwable) {
-                    Toast.makeText(this@ChatActivity, "加载聊天记录失败", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@ChatActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
                 }
             })
+        }
     }
 
     private fun setupWebSocket() {
         WebSocketManager.addMessageListener { message ->
-            if (message.senderId == receiverId || message.receiverId == receiverId) {
+            // 根据聊天类型判断是否显示消息
+            val shouldShowMessage = when (chatType) {
+                "group" -> message.groupId == receiverId  // 群聊消息
+                else -> message.senderId == receiverId || message.receiverId == receiverId  // 私聊消息
+            }
+
+            if (shouldShowMessage) {
                 runOnUiThread {
                     adapter.addMessage(message)
                     messagesList.scrollToPosition(adapter.itemCount - 1)
@@ -187,17 +215,24 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-    private fun sendMessage(content: String) {
+    private fun sendMessage() {
+        val content = messageInput.text.toString().trim()
+        if (content.isEmpty()) return
+
         val message = ChatMessage(
+            id = null,
             content = content,
             senderId = UserPreferences.getUserId(this),
             senderName = UserPreferences.getUsername(this),
-            receiverId = receiverId,
-            receiverName = receiverName,
+            receiverId = if (chatType == "group") null else receiverId,  // 群聊时 receiverId 为 null
+            receiverName = if (chatType == "group") null else receiverName,  // 群聊时 receiverName 为 null
             type = MessageType.TEXT,
-            timestamp = LocalDateTime.now()
+            timestamp = LocalDateTime.now(),
+            groupId = if (chatType == "group") receiverId else null  // 群聊时使用 receiverId 作为 groupId
         )
+
         WebSocketManager.sendMessage(message)
+        messageInput.text.clear()
     }
 
     private fun showDeleteButton() {
@@ -310,7 +345,7 @@ class ChatActivity : AppCompatActivity() {
                 override fun onResponse(call: retrofit2.Call<FileDTO>, response: retrofit2.Response<FileDTO>) {
                     if (response.isSuccessful) {
                         response.body()?.let { fileDTO ->
-                            sendFileMessage(fileDTO)
+                            handleFileUploadResponse(fileDTO)
                         }
                     } else {
                         Toast.makeText(this@ChatActivity, "文件上传失败", Toast.LENGTH_SHORT).show()
@@ -324,28 +359,29 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-    private fun sendFileMessage(fileDTO: FileDTO) {
+    private fun handleFileUploadResponse(response: FileDTO) {
         println("⭐ Sending file message:")
-        println("Content type: ${fileDTO.contentType}")
-        println("Filename: ${fileDTO.filename}")
-        println("URL: ${fileDTO.url}")
-        
+        println("Content type: ${response.contentType}")
+        println("Filename: ${response.filename}")
+        println("URL: ${response.url}")
+
         val message = ChatMessage(
-            content = fileDTO.filename,
+            id = null,
+            content = response.filename,
             senderId = UserPreferences.getUserId(this),
             senderName = UserPreferences.getUsername(this),
-            receiverId = receiverId,
-            receiverName = receiverName,
+            receiverId = if (chatType == "group") null else receiverId,  // 群聊时 receiverId 为 null
+            receiverName = if (chatType == "group") null else receiverName,  // 群聊时 receiverName 为 null
             type = MessageType.FILE,
             timestamp = LocalDateTime.now(),
-            fileUrl = fileDTO.url
+            groupId = if (chatType == "group") receiverId else null,  // 群聊时使用 receiverId 作为 groupId
+            fileUrl = response.url
         )
 
-        // 添加调试日志
         println("⭐ Created message:")
         println("Type: ${message.type}")
         println("FileUrl: ${message.fileUrl}")
-        
+
         WebSocketManager.sendMessage(message)
     }
 
@@ -373,6 +409,10 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
+            R.id.action_search -> {
+                showSearchMessagesDialog()
+                true
+            }
             android.R.id.home -> {
                 finish()
                 true
@@ -437,5 +477,48 @@ class ChatActivity : AppCompatActivity() {
 
     private fun isVideoFile(extension: String): Boolean {
         return extension in listOf("mp4", "3gp", "mkv", "webm")
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.chat_menu, menu)
+        return true
+    }
+
+    private fun showSearchMessagesDialog() {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("搜索聊天记录")
+            .create()
+
+        val view = layoutInflater.inflate(R.layout.dialog_search_messages, null)
+        val searchInput = view.findViewById<EditText>(R.id.searchInput)
+        val resultsList = view.findViewById<RecyclerView>(R.id.searchResults)
+        resultsList.layoutManager = LinearLayoutManager(this)
+
+        searchInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                val query = searchInput.text.toString()
+                searchMessages(query, resultsList) { position ->
+                    dialog.dismiss()
+                    messagesList.scrollToPosition(position)
+                    adapter.highlightMessage(position)
+                }
+                true
+            } else {
+                false
+            }
+        }
+
+        dialog.setView(view)
+        dialog.show()
+    }
+
+    private fun searchMessages(query: String, resultsList: RecyclerView, onItemClick: (Int) -> Unit) {
+        // 在当前消息列表中搜索
+        val searchResults = adapter.searchMessages(query)
+        
+        // 创建搜索结果适配器
+        val adapter = SearchResultAdapter(searchResults, onItemClick)
+        
+        resultsList.adapter = adapter
     }
 }
