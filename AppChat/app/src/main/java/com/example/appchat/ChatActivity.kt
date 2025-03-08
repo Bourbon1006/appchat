@@ -11,6 +11,7 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,6 +48,10 @@ class ChatActivity : AppCompatActivity() {
     private var chatType: String = "private"
     private var isMultiSelectMode = false
     private lateinit var deleteButton: ImageButton
+    private var currentChatType: String = "PRIVATE"
+    private var currentReceiverId: Long = 0
+    private var currentGroupId: Long = -1
+    private var title: String = ""
 
     // ActivityResultLauncher for file picking
     private val filePickerLauncher: ActivityResultLauncher<String> = registerForActivityResult(
@@ -59,17 +64,35 @@ class ChatActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_chat)
 
-        // 获取Intent传递的参数
-        receiverId = intent.getLongExtra("receiver_id", 0)
-        receiverName = intent.getStringExtra("receiver_name") ?: ""
-        chatType = intent.getStringExtra("chat_type") ?: "private"
-
-        // 设置Toolbar
+        // 设置 Toolbar
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
         setSupportActionBar(toolbar)
-        supportActionBar?.apply {
-            title = receiverName
-            setDisplayHomeAsUpEnabled(true)
+        supportActionBar?.setDisplayShowTitleEnabled(false)  // 禁用 ActionBar 的标题显示
+        
+        // 获取标题文本视图
+        val toolbarTitle = findViewById<TextView>(R.id.toolbarTitle)
+
+        // 获取聊天类型和对方信息
+        currentChatType = intent.getStringExtra("chat_type") ?: "PRIVATE"
+        
+        when (currentChatType) {
+            "GROUP" -> {
+                currentGroupId = intent.getLongExtra("group_id", -1)
+                title = intent.getStringExtra("group_name") ?: ""
+                setupGroupChat(currentGroupId, title)
+            }
+            else -> {
+                currentReceiverId = intent.getLongExtra("receiver_id", -1)
+                title = intent.getStringExtra("receiver_name") ?: ""
+                setupPrivateChat(currentReceiverId, title)
+            }
+        }
+
+        // 设置标题
+        supportActionBar?.setDisplayHomeAsUpEnabled(true) // 显示返回按钮
+        toolbarTitle.text = when (currentChatType) {
+            "GROUP" -> "$title (群聊)"
+            else -> title
         }
 
         initViews()
@@ -78,6 +101,9 @@ class ChatActivity : AppCompatActivity() {
         setupAttachButton()
         loadChatHistory()
         setupWebSocket()
+
+        // 标记会话为已读
+        markSessionAsRead()
     }
 
     private fun initViews() {
@@ -159,57 +185,86 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun loadChatHistory() {
-        if (chatType == "group") {
-            // 加载群聊消息
-            ApiClient.apiService.getGroupMessages(receiverId)
-                .enqueue(object : Callback<List<ChatMessage>> {
-                    override fun onResponse(call: retrofit2.Call<List<ChatMessage>>, response: retrofit2.Response<List<ChatMessage>>) {
-                        if (response.isSuccessful) {
-                            response.body()?.let { messages ->
-                                adapter.updateMessages(messages)
-                                messagesList.scrollToPosition(adapter.itemCount - 1)
+        when (currentChatType) {
+            "GROUP" -> {
+                ApiClient.apiService.getGroupMessages(currentGroupId)
+                    .enqueue(object : Callback<List<ChatMessage>> {
+                        override fun onResponse(call: retrofit2.Call<List<ChatMessage>>, response: retrofit2.Response<List<ChatMessage>>) {
+                            if (response.isSuccessful) {
+                                response.body()?.let { messages ->
+                                    val groupMessages = messages.map { message ->
+                                        message.copy(
+                                            groupId = currentGroupId,
+                                            receiverId = null,
+                                            receiverName = null,
+                                            chatType = "GROUP"
+                                        )
+                                    }
+                                    adapter.setMessages(groupMessages)
+                                    messagesList.scrollToPosition(adapter.itemCount - 1)
+                                }
                             }
                         }
-                    }
 
-                    override fun onFailure(call: retrofit2.Call<List<ChatMessage>>, t: Throwable) {
-                        Toast.makeText(this@ChatActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
-                    }
-                })
-        } else {
-            // 加载私聊消息
-            ApiClient.apiService.getPrivateMessages(
-                UserPreferences.getUserId(this),
-                receiverId
-            ).enqueue(object : Callback<List<ChatMessage>> {
-                override fun onResponse(call: retrofit2.Call<List<ChatMessage>>, response: retrofit2.Response<List<ChatMessage>>) {
-                    if (response.isSuccessful) {
-                        response.body()?.let { messages ->
-                            adapter.updateMessages(messages)
-                            messagesList.scrollToPosition(adapter.itemCount - 1)
+                        override fun onFailure(call: retrofit2.Call<List<ChatMessage>>, t: Throwable) {
+                            Toast.makeText(this@ChatActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
                         }
-                    }
-                }
+                    })
+            }
+            else -> {
+                val currentUserId = UserPreferences.getUserId(this@ChatActivity)
+                ApiClient.apiService.getPrivateMessages(currentUserId, currentReceiverId)
+                    .enqueue(object : Callback<List<ChatMessage>> {
+                        override fun onResponse(call: retrofit2.Call<List<ChatMessage>>, response: retrofit2.Response<List<ChatMessage>>) {
+                            if (response.isSuccessful) {
+                                response.body()?.let { messages ->
+                                    val privateMessages = messages.map { message ->
+                                        message.copy(
+                                            receiverId = if (message.senderId == currentUserId) 
+                                                currentReceiverId else currentUserId,
+                                            chatType = "PRIVATE"
+                                        )
+                                    }
+                                    adapter.setMessages(privateMessages)
+                                    messagesList.scrollToPosition(adapter.itemCount - 1)
+                                }
+                            }
+                        }
 
-                override fun onFailure(call: retrofit2.Call<List<ChatMessage>>, t: Throwable) {
-                    Toast.makeText(this@ChatActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
-                }
-            })
+                        override fun onFailure(call: retrofit2.Call<List<ChatMessage>>, t: Throwable) {
+                            Toast.makeText(this@ChatActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
+                        }
+                    })
+            }
         }
     }
 
     private fun setupWebSocket() {
+        // 设置当前聊天的用户ID
+        WebSocketManager.setCurrentChat(
+            UserPreferences.getUserId(this),
+            if (currentChatType == "GROUP") currentGroupId else currentReceiverId
+        )
+
         WebSocketManager.addMessageListener { message ->
             // 根据聊天类型判断是否显示消息
-            val shouldShowMessage = when (chatType) {
-                "group" -> message.groupId == receiverId  // 群聊消息
-                else -> message.senderId == receiverId || message.receiverId == receiverId  // 私聊消息
+            val shouldShowMessage = when (currentChatType) {
+                "GROUP" -> message.groupId == currentGroupId  // 群聊消息
+                else -> {  // 私聊消息
+                    val currentUserId = UserPreferences.getUserId(this)
+                    (message.senderId == currentReceiverId && message.receiverId == currentUserId) ||
+                    (message.senderId == currentUserId && message.receiverId == currentReceiverId)
+                }
             }
 
             if (shouldShowMessage) {
                 runOnUiThread {
-                    adapter.addMessage(message)
-                    messagesList.scrollToPosition(adapter.itemCount - 1)
+                    // 只有收到的消息才添加到UI，发送的消息已经在sendMessage中添加了
+                    if (message.senderId != UserPreferences.getUserId(this)) {
+                        adapter.addMessage(message)
+                        messagesList.scrollToPosition(adapter.itemCount - 1)
+                        markSessionAsRead()
+                    }
                 }
             }
         }
@@ -219,19 +274,7 @@ class ChatActivity : AppCompatActivity() {
         val content = messageInput.text.toString().trim()
         if (content.isEmpty()) return
 
-        val message = ChatMessage(
-            id = null,
-            content = content,
-            senderId = UserPreferences.getUserId(this),
-            senderName = UserPreferences.getUsername(this),
-            receiverId = if (chatType == "group") null else receiverId,  // 群聊时 receiverId 为 null
-            receiverName = if (chatType == "group") null else receiverName,  // 群聊时 receiverName 为 null
-            type = MessageType.TEXT,
-            timestamp = LocalDateTime.now(),
-            groupId = if (chatType == "group") receiverId else null  // 群聊时使用 receiverId 作为 groupId
-        )
-
-        WebSocketManager.sendMessage(message)
+        sendMessage(content, "TEXT")
         messageInput.text.clear()
     }
 
@@ -271,7 +314,11 @@ class ChatActivity : AppCompatActivity() {
         supportActionBar?.apply {
             setDisplayHomeAsUpEnabled(true)
             setDisplayShowTitleEnabled(true)
-            title = receiverName
+            title = when (currentChatType) {
+                "private" -> receiverName
+                "group" -> "$receiverName (群聊)"
+                else -> receiverName
+            }
         }
     }
 
@@ -345,7 +392,7 @@ class ChatActivity : AppCompatActivity() {
                 override fun onResponse(call: retrofit2.Call<FileDTO>, response: retrofit2.Response<FileDTO>) {
                     if (response.isSuccessful) {
                         response.body()?.let { fileDTO ->
-                            handleFileUploadResponse(fileDTO)
+                            handleFileUploadSuccess(fileDTO)
                         }
                     } else {
                         Toast.makeText(this@ChatActivity, "文件上传失败", Toast.LENGTH_SHORT).show()
@@ -359,30 +406,18 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-    private fun handleFileUploadResponse(response: FileDTO) {
+    private fun handleFileUploadSuccess(fileDTO: FileDTO) {
         println("⭐ Sending file message:")
-        println("Content type: ${response.contentType}")
-        println("Filename: ${response.filename}")
-        println("URL: ${response.url}")
+        println("Content type: ${fileDTO.contentType}")
+        println("Filename: ${fileDTO.filename}")
+        println("URL: ${fileDTO.url}")
 
-        val message = ChatMessage(
-            id = null,
-            content = response.filename,
-            senderId = UserPreferences.getUserId(this),
-            senderName = UserPreferences.getUsername(this),
-            receiverId = if (chatType == "group") null else receiverId,  // 群聊时 receiverId 为 null
-            receiverName = if (chatType == "group") null else receiverName,  // 群聊时 receiverName 为 null
-            type = MessageType.FILE,
-            timestamp = LocalDateTime.now(),
-            groupId = if (chatType == "group") receiverId else null,  // 群聊时使用 receiverId 作为 groupId
-            fileUrl = response.url
+        // 使用完整的文件 URL 发送消息
+        sendMessage(
+            content = fileDTO.filename,
+            type = "FILE",
+            fileUrl = fileDTO.url  // 传入文件 URL
         )
-
-        println("⭐ Created message:")
-        println("Type: ${message.type}")
-        println("FileUrl: ${message.fileUrl}")
-
-        WebSocketManager.sendMessage(message)
     }
 
     private fun createTempFile(inputStream: InputStream, filename: String, extension: String): java.io.File? {
@@ -408,17 +443,17 @@ class ChatActivity : AppCompatActivity() {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return when (item.itemId) {
+        when (item.itemId) {
+            android.R.id.home -> {
+                finish()
+                return true
+            }
             R.id.action_search -> {
                 showSearchMessagesDialog()
                 true
             }
-            android.R.id.home -> {
-                finish()
-                true
-            }
-            else -> super.onOptionsItemSelected(item)
         }
+        return super.onOptionsItemSelected(item)
     }
 
     override fun onDestroy() {
@@ -520,5 +555,80 @@ class ChatActivity : AppCompatActivity() {
         val adapter = SearchResultAdapter(searchResults, onItemClick)
         
         resultsList.adapter = adapter
+    }
+
+    private fun markSessionAsRead() {
+        lifecycleScope.launch {
+            try {
+                val partnerId = when (currentChatType) {
+                    "GROUP" -> currentGroupId
+                    else -> currentReceiverId
+                }
+                println("🔍 Marking session as read - Type: $currentChatType, PartnerId: $partnerId")
+                
+                ApiClient.apiService.markSessionAsRead(
+                    userId = UserPreferences.getUserId(this@ChatActivity),
+                    partnerId = partnerId,
+                    type = currentChatType.lowercase()
+                ).let { response ->
+                    if (!response.isSuccessful) {
+                        println("⚠️ Failed to mark session as read: ${response.code()}")
+                    } else {
+                        println("✅ Successfully marked session as read")
+                    }
+                }
+            } catch (e: Exception) {
+                println("❌ Error marking session as read: ${e.message}")
+            }
+        }
+    }
+
+    private fun setupGroupChat(groupId: Long, groupName: String) {
+        currentChatType = "GROUP"
+        currentGroupId = groupId
+        title = groupName
+        println("🔄 Setting up group chat - GroupID: $groupId, Name: $groupName")
+    }
+
+    private fun setupPrivateChat(receiverId: Long, receiverName: String) {
+        currentChatType = "PRIVATE"
+        currentReceiverId = receiverId
+        title = receiverName
+        println("🔄 Setting up private chat - ReceiverID: $receiverId, Name: $receiverName")
+    }
+
+    private fun sendMessage(content: String, type: String = "TEXT", fileUrl: String? = null) {
+        val userId = UserPreferences.getUserId(this)
+        val username = UserPreferences.getUsername(this)
+        
+        val message = ChatMessage(
+            id = null,
+            senderId = userId,
+            senderName = username,
+            content = content,
+            type = MessageType.valueOf(type),
+            receiverId = if (currentChatType == "PRIVATE") currentReceiverId else null,
+            receiverName = if (currentChatType == "PRIVATE") title else null,
+            groupId = if (currentChatType == "GROUP") currentGroupId else null,
+            timestamp = LocalDateTime.now(),
+            fileUrl = fileUrl,  // 确保设置文件 URL
+            chatType = currentChatType
+        )
+        
+        // 发送到服务器
+        WebSocketManager.sendMessage(message, 
+            onSuccess = {
+                // 消息发送成功后再添加到UI，使用带有 fileUrl 的消息对象
+                runOnUiThread {
+                    adapter.addMessage(message)
+                    messagesList.scrollToPosition(adapter.itemCount - 1)
+                }
+            },
+            onError = { error ->
+                runOnUiThread {
+                    Toast.makeText(this, "发送失败: $error", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
     }
 }

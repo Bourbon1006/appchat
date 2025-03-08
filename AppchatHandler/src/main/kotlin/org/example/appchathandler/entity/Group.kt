@@ -11,6 +11,9 @@ class Group(
 
     var name: String,
 
+    @Column(name = "avatar_url")
+    var avatarUrl: String? = null,
+
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "creator_id")
     var creator: User,

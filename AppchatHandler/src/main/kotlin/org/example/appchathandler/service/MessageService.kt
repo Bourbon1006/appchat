@@ -11,12 +11,21 @@ import org.example.appchathandler.dto.MessageDTO
 import org.example.appchathandler.dto.toDTO
 import org.example.appchathandler.model.Message as ModelMessage
 import org.example.appchathandler.model.MessageType as ModelMessageType
+import org.example.appchathandler.repository.MessageReadStatusRepository
+import org.example.appchathandler.repository.UserRepository
+import org.example.appchathandler.dto.MessageSessionDTO
+import org.example.appchathandler.entity.User
+import org.example.appchathandler.dto.MessageSessionInfo
+import org.example.appchathandler.repository.GroupRepository
 
 @Service
 class MessageService(
     private val messageRepository: MessageRepository,
     private val userService: UserService,
-    private val groupService: GroupService
+    private val groupService: GroupService,
+    private val messageReadStatusRepository: MessageReadStatusRepository,
+    private val userRepository: UserRepository,
+    private val groupRepository: GroupRepository
 ) {
     fun createMessage(
         content: String,
@@ -40,20 +49,13 @@ class MessageService(
             throw IllegalArgumentException("必须指定接收者或群组")
         }
 
-        if (group == null && receiver == null) {
-            throw IllegalArgumentException("接收者不存在")
-        }
-
         val message = Message(
-            id = 0,
             content = content,
-            timestamp = LocalDateTime.now(),
             sender = sender,
             receiver = receiver,
             group = group,
             type = type,
-            fileUrl = fileUrl,
-            deletedForUsers = mutableSetOf()
+            fileUrl = fileUrl
         )
 
         return messageRepository.save(message)
@@ -71,7 +73,6 @@ class MessageService(
 
     fun getPrivateMessages(userId: Long, otherId: Long): List<MessageDTO> {
         try {
-            // 验证用户是否存在
             val user = userService.getUser(userId)
             val otherUser = userService.getUser(otherId)
             
@@ -83,10 +84,10 @@ class MessageService(
                         timestamp = message.timestamp,
                         senderId = message.sender.id,
                         senderName = message.sender.username,
-                        receiverId = message.receiver?.id,
+                        receiverId = message.receiver?.id ?: 0L,
                         receiverName = message.receiver?.username,
                         groupId = message.group?.id,
-                        type = message.type ?: MessageType.TEXT,  // 处理可能为空的情况
+                        type = message.type,
                         fileUrl = message.fileUrl
                     )
                 }
@@ -249,6 +250,48 @@ class MessageService(
             e.printStackTrace()
             println("❌ Error saving group message: ${e.message}")
             throw e
+        }
+    }
+
+    fun markSessionAsRead(userId: Long, partnerId: Long, type: String) {
+        val user = userRepository.findById(userId).orElseThrow()
+        val unreadMessages = messageReadStatusRepository.findUnreadMessages(userId, partnerId)
+        
+        unreadMessages.forEach { message ->
+            message.addReadStatus(user)
+        }
+        
+        messageRepository.saveAll(unreadMessages)
+    }
+
+    fun getMessageSessions(userId: Long): List<MessageSessionInfo> {
+        try {
+            return messageRepository.findMessageSessions(userId)
+        } catch (e: Exception) {
+            e.printStackTrace() // 打印错误堆栈以便调试
+            throw e
+        }
+    }
+
+    fun markPrivateMessagesAsRead(userId: Long, partnerId: Long) {
+        val user = userRepository.findById(userId).orElseThrow { IllegalArgumentException("User not found") }
+        val partner = userRepository.findById(partnerId).orElseThrow { IllegalArgumentException("Partner not found") }
+
+        // 获取所有未读消息并标记为已读
+        messageRepository.findUnreadPrivateMessages(userId, partnerId).forEach { message ->
+            message.markAsRead(user)
+            messageRepository.save(message)
+        }
+    }
+
+    fun markGroupMessagesAsRead(userId: Long, groupId: Long) {
+        val user = userRepository.findById(userId).orElseThrow { IllegalArgumentException("User not found") }
+        val group = groupRepository.findById(groupId).orElseThrow { IllegalArgumentException("Group not found") }
+
+        // 获取所有未读的群消息并标记为已读
+        messageRepository.findUnreadGroupMessages(userId, groupId).forEach { message ->
+            message.markAsRead(user)
+            messageRepository.save(message)
         }
     }
 } 

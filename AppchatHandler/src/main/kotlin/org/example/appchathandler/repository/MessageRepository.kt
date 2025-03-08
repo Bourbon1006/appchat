@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import org.springframework.stereotype.Repository
 import java.time.LocalDateTime
+import org.example.appchathandler.dto.MessageSessionInfo
 
 @Repository
 interface MessageRepository : JpaRepository<Message, Long> {
@@ -132,4 +133,101 @@ interface MessageRepository : JpaRepository<Message, Long> {
 """)
     fun isMessageDeletedForAllUsers(@Param("messageId") messageId: Long): Boolean
 
+    @Query(
+        nativeQuery = true,
+        value = """
+    WITH RankedMessages AS (
+        SELECT 
+            m.*,
+            s.username as sender_name,
+            s.avatar_url as sender_avatar,
+            r.username as receiver_name,
+            r.avatar_url as receiver_avatar,
+            g.name as group_name,
+            g.avatar_url as group_avatar,
+            ROW_NUMBER() OVER (
+                PARTITION BY 
+                    CASE 
+                        WHEN m.group_id IS NULL THEN  -- 使用 group_id 是否为 NULL 来判断是否为私聊
+                            CASE 
+                                WHEN m.sender_id = :userId THEN m.receiver_id
+                                ELSE m.sender_id
+                            END
+                        ELSE m.group_id
+                    END
+                ORDER BY m.timestamp DESC
+            ) as rn
+        FROM messages m
+        LEFT JOIN users s ON m.sender_id = s.id
+        LEFT JOIN users r ON m.receiver_id = r.id
+        LEFT JOIN `groups` g ON m.group_id = g.id
+        WHERE m.sender_id = :userId 
+            OR m.receiver_id = :userId 
+            OR m.group_id IN (SELECT group_id FROM group_members WHERE user_id = :userId)
+    )
+    SELECT 
+        id as id,
+        CASE 
+            WHEN group_id IS NULL THEN  -- 使用 group_id 是否为 NULL 来判断是否为私聊
+                CASE 
+                    WHEN sender_id = :userId THEN receiver_id
+                    ELSE sender_id
+                END
+            ELSE group_id
+        END as partnerId,
+        CASE 
+            WHEN group_id IS NULL THEN 
+                CASE 
+                    WHEN sender_id = :userId THEN receiver_name
+                    ELSE sender_name
+                END
+            ELSE group_name
+        END as partnerName,
+        CASE 
+            WHEN group_id IS NULL THEN 
+                CASE 
+                    WHEN sender_id = :userId THEN 
+                        COALESCE(receiver_avatar, '/api/users/' || receiver_id || '/avatar')
+                    ELSE 
+                        COALESCE(sender_avatar, '/api/users/' || sender_id || '/avatar')
+                END
+            ELSE COALESCE(group_avatar, '/api/groups/' || group_id || '/avatar')
+        END as partnerAvatar,
+        content as lastMessage,
+        timestamp as lastMessageTime,
+        CASE 
+            WHEN group_id IS NULL THEN 'PRIVATE'
+            ELSE 'GROUP'
+        END as type
+    FROM RankedMessages
+    WHERE rn = 1
+    ORDER BY timestamp DESC
+""")
+    fun findMessageSessions(@Param("userId") userId: Long): List<MessageSessionInfo>
+
+    @Query("""
+        SELECT m FROM Message m 
+        WHERE m.group IS NULL 
+        AND (
+            (m.sender.id = :partnerId AND m.receiver.id = :userId)
+            OR (m.sender.id = :userId AND m.receiver.id = :partnerId)
+        )
+        AND :userId NOT IN (SELECT u.id FROM m.readBy u)
+        ORDER BY m.timestamp ASC
+    """)
+    fun findUnreadPrivateMessages(
+        @Param("userId") userId: Long,
+        @Param("partnerId") partnerId: Long
+    ): List<Message>
+
+    @Query("""
+        SELECT m FROM Message m 
+        WHERE m.group.id = :groupId
+        AND :userId NOT IN (SELECT u.id FROM m.readBy u)
+        ORDER BY m.timestamp ASC
+    """)
+    fun findUnreadGroupMessages(
+        @Param("userId") userId: Long,
+        @Param("groupId") groupId: Long
+    ): List<Message>
 }

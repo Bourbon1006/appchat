@@ -15,40 +15,21 @@ data class ChatMessage(
     val groupId: Long? = null,
     val type: MessageType = MessageType.TEXT,
     val fileUrl: String? = null,
-    val timestamp: LocalDateTime? = null
+    val timestamp: LocalDateTime? = null,
+    val chatType: String = if (groupId != null) "GROUP" else "PRIVATE"
 )
 
 class LocalDateTimeAdapter : TypeAdapter<LocalDateTime>() {
     override fun write(out: JsonWriter, value: LocalDateTime?) {
         if (value == null) {
             out.nullValue()
-            return
+        } else {
+            out.value(value.toString())
         }
-        out.beginArray()
-        out.value(value.year)
-        out.value(value.monthValue)
-        out.value(value.dayOfMonth)
-        out.value(value.hour)
-        out.value(value.minute)
-        out.value(value.second)
-        out.value(value.nano)
-        out.endArray()
     }
 
-    override fun read(reader: JsonReader): LocalDateTime? {
-        if (reader.peek() == com.google.gson.stream.JsonToken.NULL) {
-            reader.nextNull()
-            return null
-        }
-        reader.beginArray()
-        val year = reader.nextInt()
-        val month = reader.nextInt()
-        val day = reader.nextInt()
-        val hour = reader.nextInt()
-        val minute = reader.nextInt()
-        val second = reader.nextInt()
-        val nano = reader.nextInt()
-        reader.endArray()
-        return LocalDateTime.of(year, month, day, hour, minute, second, nano)
+    override fun read(input: JsonReader): LocalDateTime? {
+        val value = input.nextString()
+        return if (value == null) null else LocalDateTime.parse(value)
     }
 }

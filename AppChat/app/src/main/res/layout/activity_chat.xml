@@ -18,6 +18,18 @@
             android:background="?attr/colorPrimary"
             app:popupTheme="@style/ThemeOverlay.AppCompat.Light">
     
+            <!-- 添加标题文本视图 -->
+            <TextView
+                android:id="@+id/toolbarTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="start|center_vertical"
+                android:textColor="@android:color/white"
+                android:textSize="20sp"
+                android:maxLines="1"
+                android:textStyle="bold"
+                android:layout_marginStart="16dp"
+                android:ellipsize="end" />
     
             <!-- 多选模式的删除按钮 -->
             <ImageButton

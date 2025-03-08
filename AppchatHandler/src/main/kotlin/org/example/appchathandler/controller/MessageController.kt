@@ -1,14 +1,11 @@
 package org.example.appchathandler.controller
 
-import org.example.appchathandler.dto.MessageDTO
-import org.example.appchathandler.dto.toDTO
+import org.example.appchathandler.dto.*
 import org.example.appchathandler.service.MessageService
 import org.springframework.web.bind.annotation.*
 import org.springframework.http.ResponseEntity
 import java.time.LocalDateTime
 import org.springframework.http.HttpStatus
-import org.example.appchathandler.dto.DeleteMessageResponse
-import org.example.appchathandler.dto.FileDTO
 import org.springframework.core.io.FileSystemResource
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
@@ -199,6 +196,41 @@ class MessageController(
             e.printStackTrace()
             println("❌ Failed to serve file: ${e.message}")
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
+        }
+    }
+
+    @GetMapping("/sessions")
+    fun getMessageSessions(@RequestParam userId: Long): ResponseEntity<List<MessageSessionInfo>> {
+        return try {
+            val sessions = messageService.getMessageSessions(userId)
+            ResponseEntity.ok(sessions)
+        } catch (e: Exception) {
+            e.printStackTrace() // 打印错误堆栈以便调试
+            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
+        }
+    }
+
+    @PostMapping("/read")
+    fun markAsRead(
+        @RequestParam userId: Long,
+        @RequestParam partnerId: Long,
+        @RequestParam type: String
+    ): ResponseEntity<Unit> {
+        return try {
+            when (type.lowercase()) {
+                "group" -> {
+                    // 标记群聊消息为已读
+                    messageService.markGroupMessagesAsRead(userId, partnerId)
+                }
+                "private" -> {
+                    // 标记私聊消息为已读
+                    messageService.markPrivateMessagesAsRead(userId, partnerId)
+                }
+                else -> throw IllegalArgumentException("Invalid chat type: $type")
+            }
+            ResponseEntity.ok().build()
+        } catch (e: Exception) {
+            ResponseEntity.badRequest().build()
         }
     }
 } 

@@ -76,15 +76,6 @@ class AppchatHandlerApplication {
     }
 
     @Bean
-    fun objectMapper(): ObjectMapper {
-        return ObjectMapper()
-            .registerModule(KotlinModule.Builder().build())
-            .registerModule(JavaTimeModule())
-            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-            .configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, true)
-    }
-
-    @Bean
     fun multipartResolver(): MultipartResolver {
         return StandardServletMultipartResolver()
     }

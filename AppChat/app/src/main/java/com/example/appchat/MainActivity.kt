@@ -75,7 +75,9 @@ import android.content.IntentFilter
 import android.content.Context.RECEIVER_NOT_EXPORTED
 import android.widget.*
 import com.example.appchat.fragment.ContactsFragment
+import com.example.appchat.fragment.MessageDisplayFragment
 import com.example.appchat.websocket.WebSocketManager
+import androidx.fragment.app.Fragment
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webSocket: WebSocket
@@ -176,10 +178,7 @@ class MainActivity : AppCompatActivity() {
         // 设置 Toolbar
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
         setSupportActionBar(toolbar)
-        supportActionBar?.apply {
-            setDisplayShowTitleEnabled(true)
-            title = "聊天"
-        }
+
 
         // 加载头像
         val toolbarAvatar = findViewById<ImageView>(R.id.toolbarAvatar)
@@ -205,17 +204,14 @@ class MainActivity : AppCompatActivity() {
         val bottomNavigation = findViewById<BottomNavigationView>(R.id.bottomNavigation)
         bottomNavigation.setOnItemSelectedListener { item ->
             when (item.itemId) {
-/*                R.id.nav_group -> {
-                    supportActionBar?.title = "群聊"
-                    showGroupListDialog()
+                R.id.message_display -> {
+                    supportActionBar?.title = "消息"
+                    loadFragment(MessageDisplayFragment())
                     true
-                }*/
+                }
                 R.id.nav_contacts -> {
                     supportActionBar?.title = "联系人"
-                    val fragment = ContactsFragment()
-                    supportFragmentManager.beginTransaction()
-                        .replace(R.id.fragmentContainer, fragment)
-                        .commit()
+                    loadFragment(ContactsFragment())
                     true
                 }
                 R.id.nav_profile -> {
@@ -288,6 +284,9 @@ class MainActivity : AppCompatActivity() {
         } else {
             registerReceiver(avatarRefreshReceiver, filter)
         }
+
+        // 默认显示消息页面
+        bottomNavigation.selectedItemId = R.id.message_display
     }
 
     private fun setupViews() {
@@ -465,7 +464,7 @@ class MainActivity : AppCompatActivity() {
 
         val adapter = ContactAdapter { contact ->
             dialog.dismiss()
-            startPrivateChat(contact.id)
+            startPrivateChat(contact.id, contact.username)
         }
         contactsList.adapter = adapter
 
@@ -923,7 +922,7 @@ class MainActivity : AppCompatActivity() {
                             if (response.isSuccessful) {
                                 response.body()?.let { messages ->
                                     println("✅ Received ${messages.size} messages from server")
-                                    messageAdapter.updateMessages(messages)
+                                    messageAdapter.setMessages(messages)
                                 }
                             }
                         }
@@ -941,7 +940,7 @@ class MainActivity : AppCompatActivity() {
                             if (response.isSuccessful) {
                                 response.body()?.let { messages ->
                                     println("✅ Received ${messages.size} messages from server")
-                                    messageAdapter.updateMessages(messages)
+                                    messageAdapter.setMessages(messages)
                                 }
                             }
                         }
@@ -1448,25 +1447,13 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    fun startPrivateChat(userId: Long) {
-        currentChatUserId = userId
-        currentChatGroupId = null
-        
-        // 获取用户信息并更新标题
-        apiService.getUser(userId).enqueue(object : Callback<UserDTO> {
-            override fun onResponse(call: Call<UserDTO>, response: Response<UserDTO>) {
-                if (response.isSuccessful) {
-                    response.body()?.let { user ->
-                        updateToolbarTitle("与 ${user.nickname ?: user.username} 聊天中")
-                    }
-                }
-            }
-            override fun onFailure(call: Call<UserDTO>, t: Throwable) {
-                updateToolbarTitle("私聊")
-            }
-        })
-        
-        loadMessages(userId = userId)
+    fun startPrivateChat(userId: Long, username: String) {
+        val intent = Intent(this, ChatActivity::class.java).apply {
+            putExtra("chat_type", "PRIVATE")
+            putExtra("receiver_id", userId)
+            putExtra("receiver_name", username)
+        }
+        startActivity(intent)
     }
 
     private fun uploadAvatar(uri: Uri) {
@@ -1537,7 +1524,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    fun showMultiSelectActionBar() {
+    /*fun showMultiSelectActionBar() {
         // 显示多选模式的工具栏
         supportActionBar?.apply {
             setDisplayHomeAsUpEnabled(true)
@@ -1567,6 +1554,12 @@ class MainActivity : AppCompatActivity() {
         deleteButton.setOnClickListener {
             deleteCallback?.invoke()
         }
+    }*/
+
+    private fun loadFragment(fragment: Fragment) {
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.fragmentContainer, fragment)
+            .commit()
     }
 
     companion object {

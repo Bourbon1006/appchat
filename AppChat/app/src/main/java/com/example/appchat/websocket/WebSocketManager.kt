@@ -1,6 +1,7 @@
 package com.example.appchat.websocket
 
 import android.util.Log
+import com.example.appchat.api.ApiClient
 import com.example.appchat.model.*
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
@@ -9,6 +10,10 @@ import java.time.LocalDateTime
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import org.json.JSONObject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 class WebSocketManager {
     companion object {
@@ -23,6 +28,9 @@ class WebSocketManager {
         private val gson = GsonBuilder()
             .registerTypeAdapter(LocalDateTime::class.java, LocalDateTimeAdapter())
             .create()
+        private var currentChatPartnerId: Long = 0
+        private var currentUserId: Long = 0
+        private val coroutineScope = CoroutineScope(Dispatchers.Main + Job())
 
         data class WebSocketResponse(
             val type: String,
@@ -54,9 +62,7 @@ class WebSocketManager {
                             val messages = gson.fromJson(text, Array<ChatMessage>::class.java)
                             android.os.Handler(android.os.Looper.getMainLooper()).post {
                                 messages.forEach { message ->
-                                    messageListeners.forEach { listener ->
-                                        listener(message)
-                                    }
+                                    handleNewMessage(message)
                                 }
                             }
                             return
@@ -68,9 +74,7 @@ class WebSocketManager {
                             when (response.type) {
                                 "message" -> {
                                     response.message?.let { message ->
-                                        messageListeners.forEach { listener ->
-                                            listener(message)
-                                        }
+                                        handleNewMessage(message)
                                     }
                                 }
                                 "error" -> {
@@ -120,25 +124,35 @@ class WebSocketManager {
             })
         }
 
-        fun sendMessage(message: ChatMessage) {
-            if (webSocket == null) {
-                Log.e("WebSocketManager", "WebSocket未连接")
-                return
+        fun sendMessage(
+            message: ChatMessage, 
+            onSuccess: () -> Unit = {}, 
+            onError: (String) -> Unit = {}
+        ) {
+            try {
+                val messageJson = JSONObject().apply {
+                    put("type", "CHAT")
+                    put("senderId", message.senderId)
+                    put("senderName", message.senderName)
+                    put("content", message.content)
+                    put("messageType", message.type)
+                    put("fileUrl", message.fileUrl)
+                    
+                    if (message.groupId != null) {
+                        put("groupId", message.groupId)
+                    } else {
+                        put("receiverId", message.receiverId)
+                        put("receiverName", message.receiverName)
+                    }
+                }
+                
+                println("📤 Sending message: $messageJson")
+                webSocket?.send(messageJson.toString())
+                onSuccess()
+            } catch (e: Exception) {
+                println("❌ Error sending message: ${e.message}")
+                onError(e.message ?: "Unknown error")
             }
-
-            val messageJson = JSONObject().apply {
-                put("type", "CHAT")  // 统一使用 "CHAT" 类型
-                put("senderId", message.senderId)
-                put("senderName", message.senderName)
-                put("content", message.content)
-                put("messageType", message.type)
-                put("receiverId", message.receiverId)
-                put("receiverName", message.receiverName)
-                put("groupId", message.groupId)  // 服务器根据 groupId 是否为 null 来判断是群聊还是私聊
-                put("fileUrl", message.fileUrl)
-            }
-            println("📤 Sending message: $messageJson")
-            webSocket?.send(messageJson.toString())
         }
 
         fun addMessageListener(listener: (ChatMessage) -> Unit) {
@@ -156,6 +170,32 @@ class WebSocketManager {
         fun disconnect() {
             webSocket?.close(1000, "Normal closure")
             webSocket = null
+        }
+
+        private fun handleNewMessage(message: ChatMessage) {
+            if (message.senderId != currentChatPartnerId) {
+                messageListeners.forEach { it(message) }
+                return
+            }
+
+            coroutineScope.launch {
+                try {
+                    ApiClient.apiService.markSessionAsRead(
+                        userId = currentUserId,
+                        partnerId = message.senderId,
+                        type = if (message.groupId != null) "group" else "private"
+                    )
+                } catch (e: Exception) {
+                    // 忽略错误
+                }
+            }
+
+            messageListeners.forEach { it(message) }
+        }
+
+        fun setCurrentChat(userId: Long, partnerId: Long) {
+            currentUserId = userId
+            currentChatPartnerId = partnerId
         }
     }
 }

@@ -10,6 +10,8 @@ import retrofit2.http.Multipart
 import retrofit2.http.POST
 import retrofit2.http.Part
 import okhttp3.ResponseBody
+import java.time.LocalDateTime
+import okhttp3.RequestBody
 
 interface ApiService {
     @POST("api/auth/login")
@@ -126,6 +128,25 @@ interface ApiService {
 
     @GET("api/users/{userId}")
     fun getUser(@Path("userId") userId: Long): Call<UserDTO>
+
+    @GET("api/messages/sessions")
+    suspend fun getMessageSessions(
+        @Query("userId") userId: Long
+    ): List<MessageSession>
+
+    @POST("api/messages/read")
+    suspend fun markSessionAsRead(
+        @Query("userId") userId: Long,
+        @Query("partnerId") partnerId: Long,
+        @Query("type") type: String
+    ): Response<Unit>
+
+    @DELETE("api/messages/sessions")
+    suspend fun deleteSession(
+        @Query("userId") userId: Long,
+        @Query("partnerId") partnerId: Long,
+        @Query("type") type: String
+    ): Response<Unit>
 }
 
 data class DeleteMessageResponse(
