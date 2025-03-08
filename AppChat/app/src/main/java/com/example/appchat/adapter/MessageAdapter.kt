@@ -283,6 +283,10 @@ class MessageAdapter(
         notifyDataSetChanged()
     }
 
+    fun getMessage(messageId: Long): ChatMessage? {
+        return messages.find { it.id == messageId }
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MessageViewHolder {
         val layout = when (viewType) {
             VIEW_TYPE_MY_MESSAGE -> R.layout.item_message_sent
@@ -423,83 +427,93 @@ class MessageAdapter(
 
             when (message.type) {
                 MessageType.TEXT -> {
+                    messageText.visibility = View.VISIBLE
                     messageText.text = message.content
-                    fileIcon?.visibility = View.GONE
                     fileContainer?.visibility = View.GONE
                 }
                 MessageType.FILE -> {
                     val extension = message.content.substringAfterLast('.', "").lowercase()
                     when {
                         isImageFile(extension) -> {
+                            // 对于图片文件，直接显示图片预览
                             messageText.visibility = View.GONE
-                            fileIcon?.visibility = View.VISIBLE
                             fileContainer?.visibility = View.VISIBLE
-                            message.fileUrl?.let { url ->
-                                Glide.with(itemView.context)
-                                    .load(url)
-                                    .override(400, 400)
-                                    .centerCrop()
-                                    .into(fileIcon!!)
+                            fileIcon?.visibility = View.VISIBLE
+                            playIcon?.visibility = View.GONE
+
+                            // 构建完整的图片URL
+                            val imageUrl = "${itemView.context.getString(R.string.server_url_format).format(
+                                itemView.context.getString(R.string.server_ip),
+                                itemView.context.getString(R.string.server_port)
+                            )}${message.fileUrl}"
+
+                            println("⭐ Loading image from URL: $imageUrl") // 添加日志
+
+                            // 直接加载图片，不显示文件图标
+                            Glide.with(itemView.context)
+                                .load(imageUrl)
+                                .placeholder(R.drawable.image_placeholder)
+                                .error(R.drawable.image_error)
+                                .diskCacheStrategy(DiskCacheStrategy.ALL)
+                                .override(400, 400)
+                                .centerCrop()
+                                .into(fileIcon!!)
+
+                            // 设置点击事件
+                            fileContainer?.setOnClickListener {
+                                val intent = Intent(itemView.context, ImagePreviewActivity::class.java)
+                                intent.putExtra("imageUrl", imageUrl)
+                                itemView.context.startActivity(intent)
                             }
                         }
                         isVideoFile(extension) -> {
+                            // 视频文件的处理保持不变
                             messageText.visibility = View.GONE
-                            fileIcon?.visibility = View.VISIBLE
                             fileContainer?.visibility = View.VISIBLE
+                            fileIcon?.visibility = View.VISIBLE
                             playIcon?.visibility = View.VISIBLE
+                            
+                            // 加载视频缩略图
+                            val videoUrl = "${itemView.context.getString(R.string.server_url_format).format(
+                                itemView.context.getString(R.string.server_ip),
+                                itemView.context.getString(R.string.server_port)
+                            )}${message.fileUrl}"
 
-                            // 使用 MediaMetadataRetriever 获取本地视频缩略图
-                            message.fileUrl?.let { url ->
-                                // 先下载视频文件到缓存目录
-                                val cacheDir = itemView.context.cacheDir
-                                val videoFile = File(cacheDir, message.content)
+                            Glide.with(itemView.context)
+                                .load(videoUrl)
+                                .placeholder(R.drawable.video_placeholder)
+                                .error(R.drawable.video_placeholder)
+                                .diskCacheStrategy(DiskCacheStrategy.ALL)
+                                .into(fileIcon!!)
 
-                                if (!videoFile.exists()) {
-                                    // 如果视频文件不存在，显示默认缩略图
-                                    Glide.with(itemView.context)
-                                        .load(R.drawable.video_placeholder)
-                                        .override(400, 400)
-                                        .centerCrop()
-                                        .into(fileIcon!!)
-                                } else {
-                                    try {
-                                        val retriever = MediaMetadataRetriever()
-                                        retriever.setDataSource(videoFile.absolutePath)
-                                        val bitmap = retriever.getFrameAtTime(0)
-                                        retriever.release()
-
-                                        if (bitmap != null) {
-                                            fileIcon?.setImageBitmap(bitmap)
-                                        } else {
-                                            fileIcon?.setImageResource(R.drawable.video_placeholder)
-                                        }
-                                    } catch (e: Exception) {
-                                        e.printStackTrace()
-                                        fileIcon?.setImageResource(R.drawable.video_placeholder)
-                                    }
-                                }
+                            // 设置点击事件打开视频预览
+                            fileContainer?.setOnClickListener {
+                                val intent = Intent(itemView.context, VideoPreviewActivity::class.java)
+                                intent.putExtra("videoUrl", videoUrl)
+                                itemView.context.startActivity(intent)
                             }
                         }
-                        isPdfFile(extension) -> {
-                            messageText.text = "📄 ${message.content}"
-                            fileIcon?.setImageResource(R.drawable.ic_pdf)
-                            fileIcon?.visibility = View.VISIBLE
-                        }
-                        isWordFile(extension) -> {
-                            messageText.text = "📝 ${message.content}"
-                            fileIcon?.setImageResource(R.drawable.ic_word)
-                            fileIcon?.visibility = View.VISIBLE
-                        }
                         else -> {
-                            messageText.text = "📎 ${message.content}"
-                            fileIcon?.setImageResource(R.drawable.ic_file)
+                            // 其他类型文件的处理保持不变
+                            messageText.visibility = View.VISIBLE
+                            fileContainer?.visibility = View.VISIBLE
                             fileIcon?.visibility = View.VISIBLE
-                        }
-                    }
-
-                    fileContainer?.let { container ->
-                        container.setOnClickListener {
-                            handleFileClick(message)
+                            playIcon?.visibility = View.GONE
+                            
+                            when {
+                                isPdfFile(extension) -> {
+                                    messageText.text = "📄 ${message.content}"
+                                    fileIcon?.setImageResource(R.drawable.ic_pdf)
+                                }
+                                isWordFile(extension) -> {
+                                    messageText.text = "📝 ${message.content}"
+                                    fileIcon?.setImageResource(R.drawable.ic_word)
+                                }
+                                else -> {
+                                    messageText.text = "📎 ${message.content}"
+                                    fileIcon?.setImageResource(R.drawable.ic_file)
+                                }
+                            }
                         }
                     }
                 }

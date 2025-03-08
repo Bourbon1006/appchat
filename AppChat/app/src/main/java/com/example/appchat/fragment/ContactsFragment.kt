@@ -1,5 +1,6 @@
 package com.example.appchat.fragment
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -11,6 +12,7 @@ import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.appchat.ChatActivity
 import com.example.appchat.MainActivity
 import com.example.appchat.R
 import com.example.appchat.adapter.ContactAdapter
@@ -49,14 +51,12 @@ class ContactsFragment : Fragment() {
 
     private fun setupRecyclerView() {
         adapter = ContactAdapter { contact ->
-            // 处理联系人点击事件，跳转到聊天界面
-            (activity as? MainActivity)?.let { mainActivity ->
-                mainActivity.supportFragmentManager.beginTransaction()
-                    .replace(R.id.fragmentContainer, ChatFragment.newInstance(contact.id, contact.username))
-                    .addToBackStack(null)
-                    .commit()
-                mainActivity.updateToolbarTitle(contact.username)
+            // 使用 Intent 启动 ChatActivity
+            val intent = Intent(requireContext(), ChatActivity::class.java).apply {
+                putExtra("receiver_id", contact.id)
+                putExtra("receiver_name", contact.username)
             }
+            startActivity(intent)
         }
         contactsList.apply {
             layoutManager = LinearLayoutManager(context)

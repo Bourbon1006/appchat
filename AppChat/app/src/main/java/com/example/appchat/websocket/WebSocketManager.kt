@@ -8,6 +8,7 @@ import okhttp3.*
 import java.time.LocalDateTime
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import org.json.JSONObject
 
 object WebSocketManager {
     private var webSocket: WebSocket? = null
@@ -147,19 +148,18 @@ object WebSocketManager {
             return
         }
 
-        val messageMap = mutableMapOf(
-            "type" to "CHAT",
-            "senderId" to message.senderId,
-            "senderName" to message.senderName,
-            "content" to message.content,
-            "messageType" to message.type.name,
-            "receiverId" to (message.receiverId ?: throw IllegalArgumentException("接收者ID不能为空")),
-            "receiverName" to (message.receiverName ?: "")
-        )
-
-        val json = gson.toJson(messageMap)
-        Log.d("WebSocketManager", "发送消息: $json")
-        webSocket?.send(json)
+        val messageJson = JSONObject().apply {
+            put("type", "CHAT")
+            put("senderId", message.senderId)
+            put("senderName", message.senderName)
+            put("content", message.content)
+            put("messageType", message.type)
+            put("receiverId", message.receiverId)
+            put("receiverName", message.receiverName)
+            put("fileUrl", message.fileUrl)
+        }
+        println("📤 Sending message: $messageJson")
+        webSocket?.send(messageJson.toString())
     }
 
     fun addMessageListener(listener: (ChatMessage) -> Unit) {
