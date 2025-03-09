@@ -80,9 +80,6 @@ data class Message(
     @Column(nullable = false)
     val timestamp: LocalDateTime = LocalDateTime.now(),
 
-    @OneToMany(mappedBy = "message", cascade = [CascadeType.ALL], orphanRemoval = true)
-    val readStatuses: MutableSet<MessageReadStatus> = mutableSetOf(),
-
     @ElementCollection
     @CollectionTable(
         name = "message_deleted_users",
@@ -91,23 +88,25 @@ data class Message(
     @Column(name = "user_id")
     var deletedForUsers: MutableSet<Long> = mutableSetOf(),
 
-    @ManyToMany
-    @JoinTable(
-        name = "message_read_by",
-        joinColumns = [JoinColumn(name = "message_id")],
-        inverseJoinColumns = [JoinColumn(name = "user_id")]
-    )
-    var readBy: MutableSet<User> = mutableSetOf()
+    @OneToMany(mappedBy = "message", cascade = [CascadeType.ALL], orphanRemoval = true)
+    var readBy: MutableSet<MessageReadStatus> = mutableSetOf()
 ) {
     fun addReadStatus(user: User) {
-        readStatuses.add(MessageReadStatus(message = this, user = user))
+        if (!readBy.any { it.userId == user.id }) {
+            val readStatus = MessageReadStatus(
+                message = this,
+                userId = user.id,
+                readTime = LocalDateTime.now()
+            )
+            readBy.add(readStatus)
+        }
     }
 
     fun markAsRead(user: User) {
-        readBy.add(user)
+        addReadStatus(user)
     }
 
     fun isReadBy(user: User): Boolean {
-        return readBy.contains(user)
+        return readBy.any { it.userId == user.id }
     }
 }

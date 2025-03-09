@@ -3,13 +3,16 @@ package org.example.appchathandler.service
 import org.example.appchathandler.repository.FriendRequestRepository
 import org.example.appchathandler.entity.FriendRequest
 import org.example.appchathandler.entity.RequestStatus
+import org.example.appchathandler.event.FriendRequestEvent
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
 @Service
 class FriendRequestService(
     private val friendRequestRepository: FriendRequestRepository,
-    private val userService: UserService
+    private val userService: UserService,
+    private val eventPublisher: ApplicationEventPublisher
 ) {
     
     @Transactional
@@ -34,7 +37,15 @@ class FriendRequestService(
             sender = sender,
             receiver = receiver
         )
-        return friendRequestRepository.save(request)
+        val savedRequest = friendRequestRepository.save(request)
+        
+        // 添加日志
+        println("🔔 Publishing FriendRequestEvent for request ${savedRequest.id} from ${savedRequest.sender.username} to ${savedRequest.receiver.username}")
+        
+        // 发布好友请求事件
+        eventPublisher.publishEvent(FriendRequestEvent(this, savedRequest))
+        
+        return savedRequest
     }
     
     @Transactional

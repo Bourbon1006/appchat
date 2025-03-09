@@ -20,6 +20,9 @@ import org.example.appchathandler.dto.WebSocketMessageDTO
 import org.example.appchathandler.entity.User
 import org.example.appchathandler.dto.MessageDTO
 import com.fasterxml.jackson.core.type.TypeReference
+import org.springframework.context.event.EventListener
+import org.example.appchathandler.event.SessionsUpdateEvent
+import org.example.appchathandler.event.FriendRequestEvent
 
 @Component
 class ChatWebSocketHandler(
@@ -72,6 +75,7 @@ class ChatWebSocketHandler(
         timestamp = timestamp
     )
     private val sessions = ConcurrentHashMap<Long, WebSocketSession>()
+    private val sessionLocks = ConcurrentHashMap<Long, Any>()
     sealed class WebSocketMessage {
         data class ChatMessage(
             val id: Long = 0,
@@ -152,6 +156,10 @@ class ChatWebSocketHandler(
                         ))))
                     }
                 }
+                
+                // 添加日志
+                println("🔌 WebSocket connection established for user $userId")
+                println("🔌 Current active sessions: ${sessions.keys}")
             } catch (e: Exception) {
                 e.printStackTrace()
                 session.close()
@@ -376,6 +384,7 @@ class ChatWebSocketHandler(
         val userId = session.uri?.query?.substringAfter("userId=")?.toLongOrNull()
         if (userId != null) {
             sessions.remove(userId)
+            sessionLocks.remove(userId)  // 清理锁对象
             userService.setUserOnline(userId, false)
             // 广播用户下线通知
             val user = userService.getUser(userId)
@@ -391,6 +400,71 @@ class ChatWebSocketHandler(
                 "user" to offlineStatus
             ))
             sessions.values.forEach { it.sendMessage(TextMessage(statusJson)) }
+        }
+    }
+
+    fun sendMessageToUser(userId: Long, message: Map<String, Any>) {
+        val session = sessions[userId]
+        if (session != null && session.isOpen) {
+            // 获取或创建该用户的锁对象
+            val lock = sessionLocks.computeIfAbsent(userId) { Any() }
+            
+            // 使用同步块确保同一时间只有一个线程向该用户发送消息
+            synchronized(lock) {
+                try {
+                    val messageJson = objectMapper.writeValueAsString(message)
+                    session.sendMessage(TextMessage(messageJson))
+                    println("📤 Sent message to user $userId: $messageJson")
+                } catch (e: Exception) {
+                    println("❌ Error sending message to user $userId: ${e.message}")
+                    e.printStackTrace()
+                }
+            }
+        } else {
+            println("⚠️ No active session found for user $userId")
+        }
+    }
+
+    @EventListener
+    fun handleSessionsUpdateEvent(event: SessionsUpdateEvent) {
+        sendMessageToUser(event.userId, mapOf(
+            "type" to "sessions_update",
+            "sessions" to event.sessions
+        ))
+    }
+
+    @EventListener
+    fun handleFriendRequestEvent(event: FriendRequestEvent) {
+        println("🔔 Received FriendRequestEvent for request ${event.friendRequest.id} from ${event.friendRequest.sender.username} to ${event.friendRequest.receiver.username}")
+        sendFriendRequest(event.friendRequest)
+    }
+    
+    fun sendFriendRequest(request: FriendRequest) {
+        val receiverId = request.receiver.id
+        println("🔍 Attempting to send friend request to user $receiverId")
+        println("🔍 Active sessions: ${sessions.keys}")
+        
+        val session = sessions[receiverId]
+        
+        if (session != null && session.isOpen) {
+            try {
+                // 使用 DTO 对象而不是直接使用实体对象
+                val friendRequestDTO = request.toDTO()
+                
+                val message = mapOf(
+                    "type" to "friendRequest",
+                    "friendRequest" to friendRequestDTO
+                )
+                val messageJson = objectMapper.writeValueAsString(message)
+                println("📝 Friend request message: $messageJson")
+                session.sendMessage(TextMessage(messageJson))
+                println("📤 Sent friend request notification to user $receiverId")
+            } catch (e: Exception) {
+                println("❌ Error sending friend request notification: ${e.message}")
+                e.printStackTrace()
+            }
+        } else {
+            println("⚠️ No active session found for user $receiverId (session=${session}, isOpen=${session?.isOpen})")
         }
     }
 }

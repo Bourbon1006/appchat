@@ -17,15 +17,22 @@ import org.example.appchathandler.dto.MessageSessionDTO
 import org.example.appchathandler.entity.User
 import org.example.appchathandler.dto.MessageSessionInfo
 import org.example.appchathandler.repository.GroupRepository
+import org.springframework.beans.factory.annotation.Autowired
+import org.example.appchathandler.entity.MessageReadStatus
+import org.example.appchathandler.service.EventService
+import org.example.appchathandler.websocket.ChatWebSocketHandler
+import org.springframework.context.annotation.Lazy
 
 @Service
 class MessageService(
     private val messageRepository: MessageRepository,
+    private val eventService: EventService,
     private val userService: UserService,
     private val groupService: GroupService,
     private val messageReadStatusRepository: MessageReadStatusRepository,
     private val userRepository: UserRepository,
-    private val groupRepository: GroupRepository
+    private val groupRepository: GroupRepository,
+    @Lazy private val webSocketHandler: ChatWebSocketHandler
 ) {
     fun createMessage(
         content: String,
@@ -273,25 +280,85 @@ class MessageService(
         }
     }
 
+    @Transactional
     fun markPrivateMessagesAsRead(userId: Long, partnerId: Long) {
-        val user = userRepository.findById(userId).orElseThrow { IllegalArgumentException("User not found") }
-        val partner = userRepository.findById(partnerId).orElseThrow { IllegalArgumentException("Partner not found") }
-
-        // 获取所有未读消息并标记为已读
-        messageRepository.findUnreadPrivateMessages(userId, partnerId).forEach { message ->
-            message.markAsRead(user)
-            messageRepository.save(message)
+        println("📝 Marking private messages as read for user $userId from partner $partnerId")
+        val unreadMessages = messageRepository.findUnreadPrivateMessages(userId, partnerId)
+        println("📨 Found ${unreadMessages.size} unread messages")
+        
+        // 打印未读消息详情
+        unreadMessages.forEachIndexed { index, message ->
+            println("📩 Unread message #${index + 1}: id=${message.id}, content='${message.content}', " +
+                    "sender=${message.sender.id}, timestamp=${message.timestamp}")
+        }
+        
+        val now = LocalDateTime.now()
+        val readStatuses = unreadMessages
+            .filter { message -> 
+                !messageReadStatusRepository.existsByMessageIdAndUserId(message.id, userId)
+            }
+            .map { message ->
+                MessageReadStatus(
+                    message = message,
+                    userId = userId,
+                    readTime = now
+                )
+            }
+        
+        if (readStatuses.isNotEmpty()) {
+            messageReadStatusRepository.saveAll(readStatuses)
+            println("✅ Successfully marked ${readStatuses.size} messages as read")
+            
+            // 使用事件服务发布更新
+            val sessions = getMessageSessions(userId)
+            eventService.publishSessionsUpdate(userId, sessions)
+        } else {
+            println("ℹ️ No new messages to mark as read")
         }
     }
 
+    @Transactional
     fun markGroupMessagesAsRead(userId: Long, groupId: Long) {
-        val user = userRepository.findById(userId).orElseThrow { IllegalArgumentException("User not found") }
-        val group = groupRepository.findById(groupId).orElseThrow { IllegalArgumentException("Group not found") }
-
-        // 获取所有未读的群消息并标记为已读
-        messageRepository.findUnreadGroupMessages(userId, groupId).forEach { message ->
-            message.markAsRead(user)
-            messageRepository.save(message)
+        println("📝 Marking group messages as read for user $userId in group $groupId")
+        val unreadMessages = messageRepository.findUnreadGroupMessages(userId, groupId)
+        println("📨 Found ${unreadMessages.size} unread messages")
+        
+        val now = LocalDateTime.now()
+        val readStatuses = unreadMessages
+            .filter { message -> 
+                // 检查是否已存在相同的已读记录
+                !messageReadStatusRepository.existsByMessageIdAndUserId(message.id, userId)
+            }
+            .map { message ->
+                MessageReadStatus(
+                    message = message,
+                    userId = userId,
+                    readTime = now
+                )
+            }
+        
+        if (readStatuses.isNotEmpty()) {
+            messageReadStatusRepository.saveAll(readStatuses)
+            println("✅ Successfully marked ${readStatuses.size} messages as read")
+            
+            // 使用事件服务发布更新
+            val sessions = getMessageSessions(userId)
+            eventService.publishSessionsUpdate(userId, sessions)
+        } else {
+            println("ℹ️ No new messages to mark as read")
         }
+    }
+
+    @Transactional
+    fun saveMessage(message: Message): Message {
+        // 发送者自动标记为已读
+        val readStatus = MessageReadStatus(
+            message = message,
+            userId = message.sender.id,
+            readTime = LocalDateTime.now()
+        )
+        message.readBy.add(readStatus)
+        
+        return messageRepository.save(message)
     }
 } 

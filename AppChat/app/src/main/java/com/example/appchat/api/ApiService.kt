@@ -65,13 +65,15 @@ interface ApiService {
     fun updateGroup(@Path("groupId") groupId: Long, @Body group: Group): Call<Group>
 
     @GET("api/messages/group/{groupId}")
-    fun getGroupMessages(@Path("groupId") groupId: Long): Call<List<ChatMessage>>
+    suspend fun getGroupMessages(
+        @Path("groupId") groupId: Long
+    ): List<ChatMessage>
 
     @GET("api/messages/private")
-    fun getPrivateMessages(
+    suspend fun getPrivateMessages(
         @Query("userId") userId: Long,
         @Query("otherId") otherId: Long
-    ): Call<List<ChatMessage>>
+    ): List<ChatMessage>
 
     @GET("api/messages/user/{userId}")
     fun getUserMessages(@Path("userId") userId: Long): Call<List<ChatMessage>>
@@ -146,6 +148,11 @@ interface ApiService {
         @Query("userId") userId: Long,
         @Query("partnerId") partnerId: Long,
         @Query("type") type: String
+    ): Response<Unit>
+
+    @POST("api/messages/{messageId}/read")
+    suspend fun markMessageAsRead(
+        @Path("messageId") messageId: Long
     ): Response<Unit>
 }
 

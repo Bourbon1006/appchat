@@ -15,15 +15,26 @@ import com.example.appchat.ChatActivity
 import com.example.appchat.R
 import com.example.appchat.adapter.MessageSessionAdapter
 import com.example.appchat.api.ApiClient
+import com.example.appchat.model.ChatMessage
 import com.example.appchat.model.MessageSession
 import com.example.appchat.util.UserPreferences
 import com.example.appchat.websocket.WebSocketManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 class MessageDisplayFragment : Fragment() {
     private lateinit var swipeRefreshLayout: SwipeRefreshLayout
     private lateinit var recyclerView: RecyclerView
     private lateinit var adapter: MessageSessionAdapter
+    private val sessions = mutableListOf<MessageSession>()
+    
+    private val sessionUpdateListener: (ChatMessage) -> Unit = { message ->
+        // 在主线程中更新UI
+        activity?.runOnUiThread {
+            // 更新会话列表
+            updateSessionWithNewMessage(message)
+        }
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -47,17 +58,20 @@ class MessageDisplayFragment : Fragment() {
             context = requireContext(),
             lifecycleOwner = viewLifecycleOwner
         )
+        
+        adapter.updateSessions(sessions)
+        
         recyclerView.adapter = adapter
         recyclerView.layoutManager = LinearLayoutManager(context)
     }
 
     private fun setupSwipeRefresh() {
         swipeRefreshLayout.setOnRefreshListener {
-            refreshMessages()
+            refreshSessions()
         }
     }
 
-    private fun refreshMessages() {
+    private fun refreshSessions() {
         // 实现刷新逻辑
     }
 
@@ -81,21 +95,27 @@ class MessageDisplayFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         
+        println("🔄 MessageDisplayFragment: onViewCreated")
         // 首次加载数据
-        loadMessageSessions()
+        loadSessions()
 
-        // 添加 WebSocket 消息监听
-        setupWebSocketListener()
+        // 设置 WebSocketManager 的引用
+        WebSocketManager.setMessageDisplayFragment(this)
+
+        // 注册会话更新监听器
+        WebSocketManager.addSessionUpdateListener(sessionUpdateListener)
     }
 
-    private fun loadMessageSessions() {
+    private fun loadSessions() {
         val userId = UserPreferences.getUserId(requireContext())
+        println("📥 Loading message sessions for user: $userId")
         lifecycleScope.launch {
             try {
-                // 从服务器获取最新的会话列表
                 val sessions = ApiClient.apiService.getMessageSessions(userId)
-                adapter.updateSessions(sessions)
+                println("📦 Loaded ${sessions.size} sessions")
+                updateSessions(sessions)
             } catch (e: Exception) {
+                println("❌ Failed to load sessions: ${e.message}")
                 Toast.makeText(context, "加载会话列表失败", Toast.LENGTH_SHORT).show()
             } finally {
                 swipeRefreshLayout.isRefreshing = false
@@ -103,16 +123,53 @@ class MessageDisplayFragment : Fragment() {
         }
     }
 
-    private fun setupWebSocketListener() {
-        WebSocketManager.addMessageListener { message ->
-            // 收到新消息时刷新会话列表
-            loadMessageSessions()
-        }
+    fun updateSessions(newSessions: List<MessageSession>) {
+        // 更新会话列表
+        sessions.clear()
+        sessions.addAll(newSessions)
+        adapter.updateSessions(sessions)
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
-        // 移除 WebSocket 消息监听
-        WebSocketManager.removeMessageListener { }
+        // 清除引用，避免内存泄漏
+        WebSocketManager.setMessageDisplayFragment(null)
+        // 移除监听器
+        WebSocketManager.removeSessionUpdateListener(sessionUpdateListener)
+    }
+
+    private fun updateSessionWithNewMessage(message: ChatMessage) {
+        // 判断消息类型（私聊/群聊）
+        val sessionId = when {
+            message.groupId != null -> message.groupId
+            message.senderId == UserPreferences.getUserId(requireContext()) -> message.receiverId
+            else -> message.senderId
+        }
+        
+        // 查找现有会话
+        val existingSession = sessions.find { it.partnerId == sessionId }
+        
+        if (existingSession != null) {
+            // 更新现有会话
+            val updatedSession = message.timestamp?.let {
+                existingSession.copy(
+                    lastMessage = message.content,
+                    lastMessageTime = it,
+                    unreadCount = existingSession.unreadCount +
+                            if (message.senderId != UserPreferences.getUserId(requireContext())) 1 else 0
+                )
+            }
+            
+            // 从列表中移除旧会话
+            sessions.remove(existingSession)
+            // 将更新后的会话添加到列表开头
+            updatedSession?.let { sessions.add(0, it) }
+            
+            // 通知适配器更新
+            adapter.updateSessions(sessions)
+        } else {
+            // 如果会话不存在，重新加载所有会话
+            loadSessions()
+        }
     }
 } 

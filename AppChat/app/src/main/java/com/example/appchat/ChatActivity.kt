@@ -36,6 +36,7 @@ import java.io.InputStream
 import java.time.LocalDateTime
 import retrofit2.Callback
 import retrofit2.Response
+import retrofit2.Call
 
 class ChatActivity : AppCompatActivity() {
     private lateinit var messagesList: RecyclerView
@@ -64,10 +65,20 @@ class ChatActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_chat)
 
+        // 首先初始化所有视图
+        initViews()
+        setupRecyclerView()
+        setupSendButton()
+        setupAttachButton()
+
         // 设置 Toolbar
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
         setSupportActionBar(toolbar)
-        supportActionBar?.setDisplayShowTitleEnabled(false)  // 禁用 ActionBar 的标题显示
+        supportActionBar?.apply {
+            setDisplayShowTitleEnabled(false)  // 不显示默认标题
+            setDisplayHomeAsUpEnabled(true)    // 显示返回按钮
+            setDisplayShowHomeEnabled(true)    // 显示 Home 图标
+        }
         
         // 获取标题文本视图
         val toolbarTitle = findViewById<TextView>(R.id.toolbarTitle)
@@ -77,33 +88,36 @@ class ChatActivity : AppCompatActivity() {
         
         when (currentChatType) {
             "GROUP" -> {
-                currentGroupId = intent.getLongExtra("group_id", -1)
-                title = intent.getStringExtra("group_name") ?: ""
-                setupGroupChat(currentGroupId, title)
+                val groupId = intent.getLongExtra("group_id", -1)
+                val groupName = intent.getStringExtra("group_name") ?: ""
+                println("🔄 Setting up group chat - GroupID: $groupId, Name: $groupName")
+                setupGroupChat(groupId, groupName)
             }
-            else -> {
-                currentReceiverId = intent.getLongExtra("receiver_id", -1)
-                title = intent.getStringExtra("receiver_name") ?: ""
-                setupPrivateChat(currentReceiverId, title)
+            "PRIVATE" -> {
+                val receiverId = intent.getLongExtra("receiver_id", -1)
+                val receiverName = intent.getStringExtra("receiver_name") ?: ""
+                println("🔄 Setting up private chat - ReceiverID: $receiverId, Name: $receiverName")
+                setupPrivateChat(receiverId, receiverName)
             }
         }
 
         // 设置标题
-        supportActionBar?.setDisplayHomeAsUpEnabled(true) // 显示返回按钮
         toolbarTitle.text = when (currentChatType) {
             "GROUP" -> "$title (群聊)"
             else -> title
         }
 
-        initViews()
-        setupRecyclerView()
-        setupSendButton()
-        setupAttachButton()
         loadChatHistory()
         setupWebSocket()
 
         // 标记会话为已读
         markSessionAsRead()
+
+        // 添加日志
+        println("📝 ChatActivity created with intent extras: ${intent.extras?.keySet()?.joinToString()}")
+        println("📝 chat_type: ${intent.getStringExtra("chat_type")}")
+        println("📝 group_id: ${intent.getLongExtra("group_id", -1)}")
+        println("📝 group_name: ${intent.getStringExtra("group_name")}")
     }
 
     private fun initViews() {
@@ -185,56 +199,46 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun loadChatHistory() {
-        when (currentChatType) {
-            "GROUP" -> {
-                ApiClient.apiService.getGroupMessages(currentGroupId)
-                    .enqueue(object : Callback<List<ChatMessage>> {
-                        override fun onResponse(call: retrofit2.Call<List<ChatMessage>>, response: retrofit2.Response<List<ChatMessage>>) {
-                            if (response.isSuccessful) {
-                                response.body()?.let { messages ->
-                                    val groupMessages = messages.map { message ->
-                                        message.copy(
-                                            groupId = currentGroupId,
-                                            receiverId = null,
-                                            receiverName = null,
-                                            chatType = "GROUP"
-                                        )
-                                    }
-                                    adapter.setMessages(groupMessages)
-                                    messagesList.scrollToPosition(adapter.itemCount - 1)
-                                }
-                            }
+        lifecycleScope.launch {
+            try {
+                val messages = when (currentChatType) {
+                    "GROUP" -> {
+                        println("📥 Loading group messages for group: $currentGroupId")
+                        val groupMessages = ApiClient.apiService.getGroupMessages(currentGroupId)
+                        groupMessages.map { message ->
+                            message.copy(
+                                groupId = currentGroupId,
+                                receiverId = null,
+                                receiverName = null,
+                                chatType = "GROUP"
+                            )
                         }
-
-                        override fun onFailure(call: retrofit2.Call<List<ChatMessage>>, t: Throwable) {
-                            Toast.makeText(this@ChatActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
+                    }
+                    else -> {
+                        println("📥 Loading private messages with user: $currentReceiverId")
+                        val currentUserId = UserPreferences.getUserId(this@ChatActivity)
+                        val privateMessages = ApiClient.apiService.getPrivateMessages(
+                            currentUserId, 
+                            currentReceiverId
+                        )
+                        privateMessages.map { message ->
+                            message.copy(
+                                receiverId = if (message.senderId == currentUserId) 
+                                    currentReceiverId else currentUserId,
+                                chatType = "PRIVATE"
+                            )
                         }
-                    })
-            }
-            else -> {
-                val currentUserId = UserPreferences.getUserId(this@ChatActivity)
-                ApiClient.apiService.getPrivateMessages(currentUserId, currentReceiverId)
-                    .enqueue(object : Callback<List<ChatMessage>> {
-                        override fun onResponse(call: retrofit2.Call<List<ChatMessage>>, response: retrofit2.Response<List<ChatMessage>>) {
-                            if (response.isSuccessful) {
-                                response.body()?.let { messages ->
-                                    val privateMessages = messages.map { message ->
-                                        message.copy(
-                                            receiverId = if (message.senderId == currentUserId) 
-                                                currentReceiverId else currentUserId,
-                                            chatType = "PRIVATE"
-                                        )
-                                    }
-                                    adapter.setMessages(privateMessages)
-                                    messagesList.scrollToPosition(adapter.itemCount - 1)
-                                }
-                            }
-                        }
-
-                        override fun onFailure(call: retrofit2.Call<List<ChatMessage>>, t: Throwable) {
-                            Toast.makeText(this@ChatActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
-                        }
-                    })
+                    }
+                }
+                
+                // 更新UI
+                adapter.setMessages(messages)
+                messagesList.scrollToPosition(adapter.itemCount - 1)
+                
+            } catch (e: Exception) {
+                e.printStackTrace()
+                println("❌ Error loading chat history: ${e.message}")
+                Toast.makeText(this@ChatActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -443,22 +447,24 @@ class ChatActivity : AppCompatActivity() {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        when (item.itemId) {
+        return when (item.itemId) {
             android.R.id.home -> {
-                finish()
-                return true
+                // 处理返回按钮点击
+                onBackPressed()
+                true
             }
             R.id.action_search -> {
                 showSearchMessagesDialog()
                 true
             }
+            else -> super.onOptionsItemSelected(item)
         }
-        return super.onOptionsItemSelected(item)
     }
 
     override fun onDestroy() {
         super.onDestroy()
         WebSocketManager.removeMessageListeners()
+        WebSocketManager.setCurrentChat(UserPreferences.getUserId(this), 0)
     }
 
     private fun showImagePreview(fileUrl: String?) {
@@ -569,7 +575,7 @@ class ChatActivity : AppCompatActivity() {
                 ApiClient.apiService.markSessionAsRead(
                     userId = UserPreferences.getUserId(this@ChatActivity),
                     partnerId = partnerId,
-                    type = currentChatType.lowercase()
+                    type = currentChatType.uppercase()
                 ).let { response ->
                     if (!response.isSuccessful) {
                         println("⚠️ Failed to mark session as read: ${response.code()}")
@@ -588,13 +594,63 @@ class ChatActivity : AppCompatActivity() {
         currentGroupId = groupId
         title = groupName
         println("🔄 Setting up group chat - GroupID: $groupId, Name: $groupName")
+        
+        // 设置标题
+        updateToolbarTitle(groupName)
+        
+        // 加载群聊消息
+        loadMessages(groupId, "GROUP")
+        
+        // 标记消息为已读
+        markMessagesAsRead(groupId, "GROUP")
     }
 
     private fun setupPrivateChat(receiverId: Long, receiverName: String) {
         currentChatType = "PRIVATE"
         currentReceiverId = receiverId
         title = receiverName
-        println("🔄 Setting up private chat - ReceiverID: $receiverId, Name: $receiverName")
+        
+        // 更新适配器
+        adapter = MessageAdapter(
+            context = this,
+            currentUserId = UserPreferences.getUserId(this),
+            currentChatType = currentChatType,
+            chatPartnerId = receiverId,
+            onMessageDelete = { messageId ->
+                lifecycleScope.launch {
+                    try {
+                        ApiClient.apiService.deleteMessage(
+                            messageId = messageId,
+                            userId = UserPreferences.getUserId(this@ChatActivity)
+                        )
+                        adapter.removeMessage(messageId)
+                        Toast.makeText(this@ChatActivity, "消息已删除", Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(this@ChatActivity, "删除失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        )
+        
+        messagesList.adapter = adapter
+        
+        // 加载消息历史
+        loadMessages(receiverId, currentChatType)
+        
+        // 标记消息为已读
+        markMessagesAsRead(receiverId, currentChatType)
+        
+        // 更新工具栏标题
+        updateToolbarTitle(receiverName)
+        
+        // 确保 WebSocket 已连接
+        if (!WebSocketManager.isConnected()) {
+            val serverUrl = "http://192.168.31.194:8080/ws"
+            WebSocketManager.init(
+                serverUrl = serverUrl,
+                userId = UserPreferences.getUserId(this)
+            )
+        }
     }
 
     private fun sendMessage(content: String, type: String = "TEXT", fileUrl: String? = null) {
@@ -630,5 +686,78 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
         )
+    }
+
+    private fun setupChat() {
+        val chatType = intent.getStringExtra("chat_type") ?: "PRIVATE"
+        
+        when (chatType) {
+            "GROUP" -> {
+                val groupId = intent.getLongExtra("group_id", -1)
+                val groupName = intent.getStringExtra("group_name") ?: ""
+                println("🔄 Setting up group chat - GroupID: $groupId, Name: $groupName")
+                
+                // 设置群聊
+                setupGroupChat(groupId, groupName)
+            }
+            "PRIVATE" -> {
+                val receiverId = intent.getLongExtra("receiver_id", -1)
+                val receiverName = intent.getStringExtra("receiver_name") ?: ""
+                println("🔄 Setting up private chat - ReceiverID: $receiverId, Name: $receiverName")
+                
+                // 设置私聊
+                setupPrivateChat(receiverId, receiverName)
+            }
+        }
+    }
+
+    private fun updateToolbarTitle(newTitle: String) {
+        supportActionBar?.title = newTitle
+    }
+
+    private fun loadMessages(partnerId: Long, type: String) {
+        println("📥 Loading messages - Type: $type, PartnerId: $partnerId")
+        lifecycleScope.launch {
+            try {
+                val messages = when (type) {
+                    "GROUP" -> {
+                        println("📥 Loading group messages for group: $partnerId")
+                        ApiClient.apiService.getGroupMessages(groupId = partnerId)
+                    }
+                    else -> {
+                        println("📥 Loading private messages with user: $partnerId")
+                        ApiClient.apiService.getPrivateMessages(
+                            userId = UserPreferences.getUserId(this@ChatActivity),
+                            otherId = partnerId
+                        )
+                    }
+                }
+                
+                // 更新UI
+                adapter.setMessages(messages)
+                messagesList.scrollToPosition(adapter.itemCount - 1)
+                
+            } catch (e: Exception) {
+                e.printStackTrace()
+                println("❌ Error loading messages: ${e.message}")
+                Toast.makeText(this@ChatActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun markMessagesAsRead(partnerId: Long, type: String) {
+        println("🔍 Marking messages as read - Type: $type, PartnerId: $partnerId")
+        lifecycleScope.launch {
+            try {
+                ApiClient.apiService.markSessionAsRead(
+                    userId = UserPreferences.getUserId(this@ChatActivity),
+                    partnerId = partnerId,
+                    type = type
+                )
+                println("✅ Successfully marked messages as read")
+            } catch (e: Exception) {
+                println("❌ Error marking messages as read: ${e.message}")
+            }
+        }
     }
 }

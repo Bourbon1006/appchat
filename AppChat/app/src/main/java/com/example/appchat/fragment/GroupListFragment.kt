@@ -49,12 +49,13 @@ class GroupListFragment : Fragment() {
 
     private fun setupRecyclerView() {
         adapter = GroupAdapter { group ->
-            val intent = Intent(requireContext(), ChatActivity::class.java).apply {
-                putExtra("receiver_id", group.id)
-                putExtra("receiver_name", group.name)
-                putExtra("chat_type", "group")
-            }
-            startActivity(intent)
+            println("🚀 Starting group chat - GroupID: ${group.id}, Name: ${group.name}")
+            
+            startActivity(Intent(context, ChatActivity::class.java).apply {
+                putExtra("chat_type", "GROUP")
+                putExtra("group_id", group.id)
+                putExtra("group_name", group.name)
+            })
         }
         recyclerView.layoutManager = LinearLayoutManager(requireContext())
         recyclerView.adapter = adapter

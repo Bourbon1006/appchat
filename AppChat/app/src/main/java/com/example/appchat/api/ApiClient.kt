@@ -10,7 +10,7 @@ import com.google.gson.GsonBuilder
 import java.time.LocalDateTime
 
 object ApiClient {
-    private const val BASE_URL = "http://192.168.31.194:8080/"
+    const val BASE_URL = "http://192.168.31.194:8080/"
 
     private val gson = GsonBuilder()
         .registerTypeAdapter(LocalDateTime::class.java, LocalDateTimeAdapter())

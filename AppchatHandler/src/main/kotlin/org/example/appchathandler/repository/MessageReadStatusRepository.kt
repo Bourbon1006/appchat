@@ -12,7 +12,7 @@ interface MessageReadStatusRepository : JpaRepository<MessageReadStatus, Long> {
     
     @Query("""
         SELECT COUNT(m) FROM Message m 
-        LEFT JOIN MessageReadStatus mrs ON mrs.message = m AND mrs.user.id = :userId
+        LEFT JOIN MessageReadStatus mrs ON mrs.message = m AND mrs.userId = :userId
         WHERE mrs IS NULL 
         AND m.receiver.id = :userId
         AND (
@@ -25,14 +25,24 @@ interface MessageReadStatusRepository : JpaRepository<MessageReadStatus, Long> {
 
     @Query("""
         SELECT m FROM Message m 
-        LEFT JOIN MessageReadStatus mrs ON mrs.message = m AND mrs.user.id = :userId
+        LEFT JOIN MessageReadStatus mrs ON mrs.message = m AND mrs.userId = :userId
         WHERE mrs IS NULL 
-        AND m.receiver.id = :userId
         AND (
-            (m.type = 'PRIVATE' AND m.sender.id = :partnerId)
+            (m.group IS NULL AND m.receiver.id = :userId AND m.sender.id = :partnerId)
             OR 
-            (m.type = 'GROUP' AND m.group.id = :partnerId)
+            (m.group IS NOT NULL AND m.group.id = :partnerId)
         )
+        ORDER BY m.timestamp ASC
     """)
     fun findUnreadMessages(userId: Long, partnerId: Long): List<Message>
+
+    @Query("""
+        SELECT CASE WHEN COUNT(mrs) > 0 THEN true ELSE false END 
+        FROM MessageReadStatus mrs 
+        WHERE mrs.message.id = :messageId 
+        AND mrs.userId = :userId
+    """)
+    fun isMessageReadByUser(messageId: Long, userId: Long): Boolean
+
+    fun existsByMessageIdAndUserId(messageId: Long, userId: Long): Boolean
 } 

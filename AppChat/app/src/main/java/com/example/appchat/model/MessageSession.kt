@@ -10,5 +10,7 @@ data class MessageSession(
     val lastMessage: String,  // 最后一条消息内容
     val lastMessageTime: LocalDateTime,  // 最后一条消息时间
     val type: String,  // 会话类型：private 或 group
-    val unreadCount: Int = 0
-) 
+    val unreadCount: Int  // 保持为 val，通过创建新对象来更新
+) {
+    fun markAsRead() = copy(unreadCount = 0)  // 提供一个创建已读版本的方法
+} 

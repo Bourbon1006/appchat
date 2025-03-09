@@ -8,15 +8,14 @@ import java.time.LocalDateTime
 data class MessageReadStatus(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    val id: Long? = null,
+    val id: Long = 0,
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "message_id", nullable = false)
     val message: Message,
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    val user: User,
+    @Column(name = "user_id", nullable = false)
+    val userId: Long,
 
     @Column(name = "read_time", nullable = false)
     val readTime: LocalDateTime = LocalDateTime.now()

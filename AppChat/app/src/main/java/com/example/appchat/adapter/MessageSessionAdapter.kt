@@ -48,6 +48,7 @@ class MessageSessionAdapter(
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val session = sessions[position]
+        println("📱 Binding session: partnerId=${session.partnerId}, unreadCount=${session.unreadCount}")
         
         // 设置头像
         if (session.partnerAvatar != null) {
@@ -75,9 +76,11 @@ class MessageSessionAdapter(
 
         // 设置未读消息数
         if (session.unreadCount > 0) {
+            println("🔴 Showing unread count: ${session.unreadCount}")
             holder.unreadCount.apply {
                 visibility = View.VISIBLE
                 text = session.unreadCount.toString()
+                setBackgroundResource(R.drawable.bg_unread_count)
             }
         } else {
             holder.unreadCount.visibility = View.GONE
@@ -98,9 +101,11 @@ class MessageSessionAdapter(
     override fun getItemCount() = sessions.size
 
     fun updateSessions(newSessions: List<MessageSession>) {
+        println("🔄 Updating sessions: ${newSessions.size} items")
         sessions.clear()
         // 按最后消息时间排序，最新的在前面
         sessions.addAll(newSessions.sortedByDescending { it.lastMessageTime })
+        println("📊 Sessions after update: ${sessions.size} items")
         notifyDataSetChanged()
     }
 
@@ -145,20 +150,18 @@ class MessageSessionAdapter(
                 val response = ApiClient.apiService.markSessionAsRead(
                     userId = userId,
                     partnerId = session.partnerId,
-                    type = session.type
+                    type = session.type.uppercase()
                 )
                 if (response.isSuccessful) {
-                    // 更新本地会话状态
-                    val index = sessions.indexOf(session)
-                    if (index != -1) {
-                        sessions[index] = session.copy(unreadCount = 0)
-                        notifyItemChanged(index)
-                    }
+                    // 直接刷新会话列表，而不是修改现有对象
+                    val sessions = ApiClient.apiService.getMessageSessions(userId)
+                    updateSessions(sessions)
                     Toast.makeText(context, "已标记为已读", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(context, "操作失败", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
+                e.printStackTrace()
                 Toast.makeText(context, "网络错误", Toast.LENGTH_SHORT).show()
             }
         }

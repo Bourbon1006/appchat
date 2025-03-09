@@ -136,27 +136,21 @@ interface MessageRepository : JpaRepository<Message, Long> {
     @Query(
         nativeQuery = true,
         value = """
-    WITH RankedMessages AS (
-        SELECT 
-            m.*,
-            s.username as sender_name,
-            s.avatar_url as sender_avatar,
-            r.username as receiver_name,
-            r.avatar_url as receiver_avatar,
-            g.name as group_name,
-            g.avatar_url as group_avatar,
-            ROW_NUMBER() OVER (
-                PARTITION BY 
-                    CASE 
-                        WHEN m.group_id IS NULL THEN  -- 使用 group_id 是否为 NULL 来判断是否为私聊
-                            CASE 
-                                WHEN m.sender_id = :userId THEN m.receiver_id
-                                ELSE m.sender_id
-                            END
-                        ELSE m.group_id
-                    END
-                ORDER BY m.timestamp DESC
-            ) as rn
+    WITH RECURSIVE RankedMessages AS (
+        SELECT m.*,
+            s.username as sender_name, s.avatar_url as sender_avatar,
+            r.username as receiver_name, r.avatar_url as receiver_avatar,
+            g.name as group_name, g.avatar_url as group_avatar,
+            ROW_NUMBER() OVER (PARTITION BY 
+                CASE 
+                    WHEN m.group_id IS NULL THEN 
+                        CASE 
+                            WHEN m.sender_id = :userId THEN m.receiver_id 
+                            ELSE m.sender_id 
+                        END
+                    ELSE m.group_id 
+                END
+                ORDER BY m.timestamp DESC) as rn
         FROM messages m
         LEFT JOIN users s ON m.sender_id = s.id
         LEFT JOIN users r ON m.receiver_id = r.id
@@ -164,55 +158,115 @@ interface MessageRepository : JpaRepository<Message, Long> {
         WHERE m.sender_id = :userId 
             OR m.receiver_id = :userId 
             OR m.group_id IN (SELECT group_id FROM group_members WHERE user_id = :userId)
+    ),
+    UnreadCounts AS (
+        SELECT 
+            CASE 
+                WHEN m.group_id IS NULL THEN 
+                    CASE 
+                        WHEN m.sender_id = :userId THEN m.receiver_id
+                        ELSE m.sender_id
+                    END
+                ELSE m.group_id
+            END as partner_id,
+            CASE 
+                WHEN m.group_id IS NULL THEN 'PRIVATE'
+                ELSE 'GROUP'
+            END as message_type,
+            COUNT(*) as unread_count
+        FROM messages m
+        LEFT JOIN message_deleted_users mdf ON m.id = mdf.message_id AND mdf.user_id = :userId
+        WHERE m.id NOT IN (
+            SELECT mrb.message_id
+            FROM message_read_status mrb
+            WHERE mrb.user_id = :userId
+        )
+        AND mdf.message_id IS NULL  -- 确保消息没有被当前用户删除
+        AND (
+            (m.group_id IS NULL AND m.receiver_id = :userId)
+            OR
+            (m.group_id IS NOT NULL AND m.sender_id != :userId AND m.group_id IN (SELECT group_id FROM group_members WHERE user_id = :userId))
+        )
+        GROUP BY 
+            CASE 
+                WHEN m.group_id IS NULL THEN 
+                    CASE 
+                        WHEN m.sender_id = :userId THEN m.receiver_id
+                        ELSE m.sender_id
+                    END
+                ELSE m.group_id
+            END,
+            CASE 
+                WHEN m.group_id IS NULL THEN 'PRIVATE'
+                ELSE 'GROUP'
+            END
     )
     SELECT 
-        id as id,
+        m.id as id,
         CASE 
-            WHEN group_id IS NULL THEN  -- 使用 group_id 是否为 NULL 来判断是否为私聊
+            WHEN m.group_id IS NULL THEN 
                 CASE 
-                    WHEN sender_id = :userId THEN receiver_id
-                    ELSE sender_id
+                    WHEN m.sender_id = :userId THEN m.receiver_id
+                    ELSE m.sender_id 
                 END
-            ELSE group_id
+            ELSE m.group_id
         END as partnerId,
         CASE 
-            WHEN group_id IS NULL THEN 
+            WHEN m.group_id IS NULL THEN 
                 CASE 
-                    WHEN sender_id = :userId THEN receiver_name
+                    WHEN m.sender_id = :userId THEN receiver_name
                     ELSE sender_name
                 END
             ELSE group_name
         END as partnerName,
         CASE 
-            WHEN group_id IS NULL THEN 
+            WHEN m.group_id IS NULL THEN 
                 CASE 
-                    WHEN sender_id = :userId THEN 
-                        COALESCE(receiver_avatar, '/api/users/' || receiver_id || '/avatar')
+                    WHEN m.sender_id = :userId THEN 
+                        COALESCE(receiver_avatar, '/api/users/' || m.receiver_id || '/avatar')
                     ELSE 
-                        COALESCE(sender_avatar, '/api/users/' || sender_id || '/avatar')
+                        COALESCE(sender_avatar, '/api/users/' || m.sender_id || '/avatar')
                 END
-            ELSE COALESCE(group_avatar, '/api/groups/' || group_id || '/avatar')
+            ELSE COALESCE(group_avatar, '/api/groups/' || m.group_id || '/avatar')
         END as partnerAvatar,
-        content as lastMessage,
-        timestamp as lastMessageTime,
+        m.content as lastMessage,
+        m.timestamp as lastMessageTime,
         CASE 
-            WHEN group_id IS NULL THEN 'PRIVATE'
+            WHEN m.group_id IS NULL THEN 'PRIVATE'
             ELSE 'GROUP'
-        END as type
-    FROM RankedMessages
+        END as type,
+        COALESCE(uc.unread_count, 0) as unreadCount
+    FROM RankedMessages m
+    LEFT JOIN UnreadCounts uc ON uc.partner_id = 
+        CASE 
+            WHEN m.group_id IS NULL THEN 
+                CASE 
+                    WHEN m.sender_id = :userId THEN m.receiver_id
+                    ELSE m.sender_id 
+                END
+            ELSE m.group_id
+        END
+        AND uc.message_type = 
+        CASE 
+            WHEN m.group_id IS NULL THEN 'PRIVATE'
+            ELSE 'GROUP'
+        END
     WHERE rn = 1
-    ORDER BY timestamp DESC
+    ORDER BY m.timestamp DESC
 """)
     fun findMessageSessions(@Param("userId") userId: Long): List<MessageSessionInfo>
 
     @Query("""
         SELECT m FROM Message m 
         WHERE m.group IS NULL 
-        AND (
-            (m.sender.id = :partnerId AND m.receiver.id = :userId)
-            OR (m.sender.id = :userId AND m.receiver.id = :partnerId)
+        AND m.receiver.id = :userId
+        AND m.sender.id = :partnerId
+        AND :userId NOT IN (SELECT du FROM m.deletedForUsers du)
+        AND m NOT IN (
+            SELECT mrs.message 
+            FROM MessageReadStatus mrs 
+            WHERE mrs.userId = :userId
         )
-        AND :userId NOT IN (SELECT u.id FROM m.readBy u)
         ORDER BY m.timestamp ASC
     """)
     fun findUnreadPrivateMessages(
@@ -223,7 +277,13 @@ interface MessageRepository : JpaRepository<Message, Long> {
     @Query("""
         SELECT m FROM Message m 
         WHERE m.group.id = :groupId
-        AND :userId NOT IN (SELECT u.id FROM m.readBy u)
+        AND m.sender.id <> :userId
+        AND :userId NOT IN (SELECT du FROM m.deletedForUsers du)
+        AND m NOT IN (
+            SELECT mrs.message 
+            FROM MessageReadStatus mrs 
+            WHERE mrs.userId = :userId
+        )
         ORDER BY m.timestamp ASC
     """)
     fun findUnreadGroupMessages(

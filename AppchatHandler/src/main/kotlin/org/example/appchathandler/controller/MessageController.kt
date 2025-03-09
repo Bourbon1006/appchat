@@ -211,26 +211,24 @@ class MessageController(
     }
 
     @PostMapping("/read")
-    fun markAsRead(
+    fun markSessionAsRead(
         @RequestParam userId: Long,
         @RequestParam partnerId: Long,
         @RequestParam type: String
-    ): ResponseEntity<Unit> {
+    ): ResponseEntity<Void> {
         return try {
-            when (type.lowercase()) {
-                "group" -> {
-                    // 标记群聊消息为已读
-                    messageService.markGroupMessagesAsRead(userId, partnerId)
-                }
-                "private" -> {
-                    // 标记私聊消息为已读
-                    messageService.markPrivateMessagesAsRead(userId, partnerId)
-                }
-                else -> throw IllegalArgumentException("Invalid chat type: $type")
+            println("📬 Marking messages as read: userId=$userId, partnerId=$partnerId, type=$type")
+            when (type.uppercase()) {
+                "GROUP" -> messageService.markGroupMessagesAsRead(userId, partnerId)
+                "PRIVATE" -> messageService.markPrivateMessagesAsRead(userId, partnerId)
+                else -> throw IllegalArgumentException("Invalid type: $type")
             }
+            println("✅ Successfully marked messages as read")
             ResponseEntity.ok().build()
         } catch (e: Exception) {
-            ResponseEntity.badRequest().build()
+            println("❌ Error marking messages as read: ${e.message}")
+            e.printStackTrace()
+            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
         }
     }
 } 

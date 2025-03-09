@@ -78,6 +78,7 @@ import com.example.appchat.fragment.ContactsFragment
 import com.example.appchat.fragment.MessageDisplayFragment
 import com.example.appchat.websocket.WebSocketManager
 import androidx.fragment.app.Fragment
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webSocket: WebSocket
@@ -178,7 +179,10 @@ class MainActivity : AppCompatActivity() {
         // 设置 Toolbar
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
         setSupportActionBar(toolbar)
-
+        supportActionBar?.apply {
+            setDisplayShowTitleEnabled(true)
+            title = "聊天"
+        }
 
         // 加载头像
         val toolbarAvatar = findViewById<ImageView>(R.id.toolbarAvatar)
@@ -285,6 +289,19 @@ class MainActivity : AppCompatActivity() {
             registerReceiver(avatarRefreshReceiver, filter)
         }
 
+        // 添加好友请求监听器
+        WebSocketManager.addFriendRequestListener { friendRequest ->
+            println("📱 Received friend request from ${friendRequest.sender.username}")
+            runOnUiThread {
+                Toast.makeText(
+                    this@MainActivity,
+                    "收到来自 ${friendRequest.sender.username} 的好友请求",
+                    Toast.LENGTH_LONG
+                ).show()
+                showFriendRequestDialog(friendRequest)
+            }
+        }
+
         // 默认显示消息页面
         bottomNavigation.selectedItemId = R.id.message_display
     }
@@ -337,7 +354,7 @@ class MainActivity : AppCompatActivity() {
                                         else -> false
                                     }
                                     println("✅ Should add message: $shouldAdd (currentChatUserId=$currentChatUserId, currentChatGroupId=$currentChatGroupId)")
-                                    
+
                                     if (shouldAdd) {
                                         println("✅ Adding new message to local database: ${message.id}")
                                         messageAdapter.addMessage(message)
@@ -570,18 +587,10 @@ class MainActivity : AppCompatActivity() {
             .setTitle("好友请求")
             .setMessage("${request.sender.username} 想添加你为好友")
             .setPositiveButton("接受") { _, _ ->
-                webSocket.sendDebug(mapOf(
-                    "type" to "HANDLE_FRIEND_REQUEST",
-                    "requestId" to request.id,
-                    "accept" to true
-                ))
+                WebSocketManager.handleFriendRequest(request.id, true)
             }
             .setNegativeButton("拒绝") { _, _ ->
-                webSocket.sendDebug(mapOf(
-                    "type" to "HANDLE_FRIEND_REQUEST",
-                    "requestId" to request.id,
-                    "accept" to false
-                ))
+                WebSocketManager.handleFriendRequest(request.id, false)
             }
             .show()
     }
@@ -598,7 +607,7 @@ class MainActivity : AppCompatActivity() {
 
         val adapter = ContactSelectionAdapter(
             contacts = emptyList(),
-            onContactClick = { selectedUser: UserDTO -> 
+            onContactClick = { selectedUser: UserDTO ->
                 // 处理用户选择
             }
         )
@@ -697,11 +706,11 @@ class MainActivity : AppCompatActivity() {
                     lifecycleScope.launch {
                         try {
                             println("🗑️ Starting message deletion process: $messageId")
-                            
+
                             // 先从本地删除
                             messageAdapter.removeMessage(messageId)
                             println("✅ Local message deletion completed")
-                            
+
                             // 然后从服务器删除
                             val response = apiService.deleteMessage(messageId, UserPreferences.getUserId(this@MainActivity))
                             if (response.isSuccessful) {
@@ -718,7 +727,7 @@ class MainActivity : AppCompatActivity() {
                 }
             )
             messageList.adapter = messageAdapter
-            loadMessages(groupId = group.id)
+            loadMessages(type = "GROUP", partnerId = group.id)
             dialog.dismiss()
         }
 
@@ -758,7 +767,7 @@ class MainActivity : AppCompatActivity() {
             message["groupId"] = groupId
         }
         currentChatUserId?.let { userId ->
-            message["receiverId"] = userId
+            message["receiverId"] to userId
         }
 
         webSocket.sendDebug(message)
@@ -775,7 +784,7 @@ class MainActivity : AppCompatActivity() {
         val addMemberButton = view.findViewById<Button>(R.id.addMemberButton)
 
         val adapter = GroupMemberAdapter(
-            members = group.members.map { member -> 
+            members = group.members.map { member ->
                 UserDTO(
                     id = member.id,
                     username = member.username,
@@ -846,7 +855,7 @@ class MainActivity : AppCompatActivity() {
                             val availableContacts = contacts.filter { contact ->
                                 !group.members.any { it.id == contact.id }
                             }
-                            
+
                             val adapter = ContactSelectionAdapter(availableContacts) { selectedUser ->
                                 apiService.addGroupMember(group.id, selectedUser.id)
                                     .enqueue(object : Callback<Group> {
@@ -883,72 +892,56 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun loadMessages(userId: Long? = null, groupId: Long? = null) {
-        // 先从本地数据库加载消息
-        messageAdapter = MessageAdapter(
-            context = this,
-            currentUserId = UserPreferences.getUserId(this),
-            currentChatType = if (userId != null) "private" else "group",
-            chatPartnerId = userId ?: groupId ?: -1L,
-            onMessageDelete = { messageId ->
-                lifecycleScope.launch {
-                    try {
-                        val response = apiService.deleteMessage(messageId, UserPreferences.getUserId(this@MainActivity))
-                        if (response.isSuccessful) {
-                            messageAdapter.removeMessage(messageId)
-                            Toast.makeText(this@MainActivity, "消息已删除", Toast.LENGTH_SHORT).show()
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
+    private fun loadMessages(type: String, partnerId: Long) {
+        lifecycleScope.launch {
+            try {
+                val messages = when (type) {
+                    "GROUP" -> {
+                        println("📥 Loading group messages for group: $partnerId")
+                        ApiClient.apiService.getGroupMessages(groupId = partnerId)
+                    }
+                    else -> {
+                        println("📥 Loading private messages with user: $partnerId")
+                        val currentUserId = UserPreferences.getUserId(this@MainActivity)
+                        ApiClient.apiService.getPrivateMessages(
+                            userId = currentUserId,
+                            otherId = partnerId
+                        )
                     }
                 }
+                
+                // 更新UI
+                messageAdapter.setMessages(messages)
+                messageList.scrollToPosition(messageAdapter.itemCount - 1)
+                
+            } catch (e: Exception) {
+                e.printStackTrace()
+                println("❌ Error loading messages: ${e.message}")
+                Toast.makeText(this@MainActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
             }
-        )
+        }
+    }
 
-        messageList.adapter = messageAdapter
-        val localMessages = messageAdapter.loadLocalMessages()
-        println("✅ Loaded ${localMessages.size} messages from local database")
-
-        // 然后从服务器获取最新消息
-        val currentUserId = UserPreferences.getUserId(this)
-        
-        when {
-            userId != null -> {
-                // 加载私聊消息
-                println("Loading private messages between $currentUserId and $userId")
-                apiService.getPrivateMessages(currentUserId, userId)
-                    .enqueue(object : Callback<List<ChatMessage>> {
-                        override fun onResponse(call: Call<List<ChatMessage>>, response: Response<List<ChatMessage>>) {
-                            if (response.isSuccessful) {
-                                response.body()?.let { messages ->
-                                    println("✅ Received ${messages.size} messages from server")
-                                    messageAdapter.setMessages(messages)
-                                }
-                            }
-                        }
-
-                        override fun onFailure(call: Call<List<ChatMessage>>, t: Throwable) {
-                            println("❌ Network error: ${t.message}")
-                        }
-                    })
+    private fun loadPrivateMessages(userId: Long, otherId: Long) {
+        lifecycleScope.launch {
+            try {
+                val messages = ApiClient.apiService.getPrivateMessages(userId, otherId)
+                messageAdapter.setMessages(messages)
+                messageList.scrollToPosition(messageAdapter.itemCount - 1)
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
             }
-            groupId != null -> {
-                // 加载群聊消息
-                apiService.getGroupMessages(groupId)
-                    .enqueue(object : Callback<List<ChatMessage>> {
-                        override fun onResponse(call: Call<List<ChatMessage>>, response: Response<List<ChatMessage>>) {
-                            if (response.isSuccessful) {
-                                response.body()?.let { messages ->
-                                    println("✅ Received ${messages.size} messages from server")
-                                    messageAdapter.setMessages(messages)
-                                }
-                            }
-                        }
+        }
+    }
 
-                        override fun onFailure(call: Call<List<ChatMessage>>, t: Throwable) {
-                            println("❌ Network error: ${t.message}")
-                        }
-                    })
+    private fun loadGroupMessages(groupId: Long) {
+        lifecycleScope.launch {
+            try {
+                val messages = ApiClient.apiService.getGroupMessages(groupId)
+                messageAdapter.setMessages(messages)
+                messageList.scrollToPosition(messageAdapter.itemCount - 1)
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -958,6 +951,8 @@ class MainActivity : AppCompatActivity() {
         // 取消注册广播接收器
         unregisterReceiver(avatarRefreshReceiver)
         webSocket.close(1000, "Activity destroyed")
+        // 移除好友请求监听器
+        WebSocketManager.removeFriendRequestListeners()
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -1393,12 +1388,43 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendFriendRequest(receiverId: Long) {
-        webSocket.sendDebug(mapOf(
-            "type" to "FRIEND_REQUEST",
-            "senderId" to UserPreferences.getUserId(this),
-            "receiverId" to receiverId
-        ))
+        try {
+            // 检查 WebSocket 是否已初始化
+            if (WebSocketManager.isConnected()) {
+                val userId = UserPreferences.getUserId(this)
+                val requestJson = JSONObject().apply {
+                    put("type", "FRIEND_REQUEST")
+                    put("senderId", userId)
+                    put("receiverId", receiverId)
+                }
+                
+                WebSocketManager.sendFriendRequest(requestJson.toString(), 
+                    onSuccess = {
+                        runOnUiThread {
+                            Toast.makeText(this, "好友请求已发送", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onError = { errorMsg ->
+                        runOnUiThread {
+                            Toast.makeText(this, "发送失败: $errorMsg", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                )
+            } else {
+                // WebSocket 未连接，尝试重新连接
+                val serverUrl = ApiClient.BASE_URL  // 使用 ApiClient 中的 BASE_URL
+                val userId = UserPreferences.getUserId(this)
+                WebSocketManager.init(serverUrl, userId)
+                
+                // 显示消息并让用户稍后重试
+                Toast.makeText(this, "正在连接服务器，请稍后重试", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "发送好友请求失败: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
+
     private fun showSearchUsersDialog() {
         val dialog = AlertDialog.Builder(this)
             .setTitle("搜索用户")
@@ -1524,7 +1550,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /*fun showMultiSelectActionBar() {
+    fun showMultiSelectActionBar() {
         // 显示多选模式的工具栏
         supportActionBar?.apply {
             setDisplayHomeAsUpEnabled(true)
@@ -1554,7 +1580,7 @@ class MainActivity : AppCompatActivity() {
         deleteButton.setOnClickListener {
             deleteCallback?.invoke()
         }
-    }*/
+    }
 
     private fun loadFragment(fragment: Fragment) {
         supportFragmentManager.beginTransaction()
