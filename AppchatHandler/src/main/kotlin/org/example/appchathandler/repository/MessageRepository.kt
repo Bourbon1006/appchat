@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param
 import org.springframework.stereotype.Repository
 import java.time.LocalDateTime
 import org.example.appchathandler.dto.MessageSessionInfo
+import org.springframework.data.jpa.repository.Modifying
 
 @Repository
 interface MessageRepository : JpaRepository<Message, Long> {
@@ -290,4 +291,22 @@ interface MessageRepository : JpaRepository<Message, Long> {
         @Param("userId") userId: Long,
         @Param("groupId") groupId: Long
     ): List<Message>
+
+    @Modifying
+    @Query("""
+        DELETE FROM Message m 
+        WHERE m.type = 'PRIVATE' 
+        AND ((m.sender.id = :userId AND m.receiver.id = :friendId)
+        OR (m.sender.id = :friendId AND m.receiver.id = :userId))
+    """)
+    fun deleteByPrivateChat(userId: Long, friendId: Long)
+
+    @Modifying
+    @Query("""
+        DELETE FROM Message m 
+        WHERE m.sender.id = :userId 
+        AND m.receiver.id = :partnerId
+    """)
+    fun deleteByUserIdAndPartnerId(userId: Long, partnerId: Long)
+
 }

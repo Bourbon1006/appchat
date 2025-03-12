@@ -11,10 +11,12 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import com.bumptech.glide.Glide
 import com.example.appchat.ChatActivity
 import com.example.appchat.R
 import com.example.appchat.adapter.MessageSessionAdapter
 import com.example.appchat.api.ApiClient
+import com.example.appchat.databinding.FragmentMessageDisplayBinding
 import com.example.appchat.model.ChatMessage
 import com.example.appchat.model.MessageSession
 import com.example.appchat.util.UserPreferences
@@ -23,6 +25,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 class MessageDisplayFragment : Fragment() {
+    private var _binding: FragmentMessageDisplayBinding? = null
+    private val binding get() = _binding!!
     private lateinit var swipeRefreshLayout: SwipeRefreshLayout
     private lateinit var recyclerView: RecyclerView
     private lateinit var adapter: MessageSessionAdapter
@@ -36,20 +40,24 @@ class MessageDisplayFragment : Fragment() {
         }
     }
 
+    private val friendDeletedListener: (Long) -> Unit = { friendId ->
+        // 从会话列表中移除该好友的会话
+        val sessionToRemove = sessions.find { 
+            it.type == "PRIVATE" && it.partnerId == friendId 
+        }
+        sessionToRemove?.let {
+            sessions.remove(it)
+            adapter.updateSessions(sessions)
+        }
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
-    ): View? {
-        val view = inflater.inflate(R.layout.fragment_message_display, container, false)
-        
-        swipeRefreshLayout = view.findViewById(R.id.swipeRefreshLayout)
-        recyclerView = view.findViewById(R.id.recyclerView)
-        
-        setupRecyclerView()
-        setupSwipeRefresh()
-        
-        return view
+    ): View {
+        _binding = FragmentMessageDisplayBinding.inflate(inflater, container, false)
+        return binding.root
     }
 
     private fun setupRecyclerView() {
@@ -95,6 +103,13 @@ class MessageDisplayFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         
+        _binding = FragmentMessageDisplayBinding.bind(view)
+        swipeRefreshLayout = binding.swipeRefreshLayout
+        recyclerView = binding.recyclerView
+
+        setupRecyclerView()
+        setupSwipeRefresh()
+
         println("🔄 MessageDisplayFragment: onViewCreated")
         // 首次加载数据
         loadSessions()
@@ -104,6 +119,7 @@ class MessageDisplayFragment : Fragment() {
 
         // 注册会话更新监听器
         WebSocketManager.addSessionUpdateListener(sessionUpdateListener)
+        WebSocketManager.addFriendDeletedListener(friendDeletedListener)
     }
 
     private fun loadSessions() {
@@ -132,18 +148,27 @@ class MessageDisplayFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        _binding = null
         // 清除引用，避免内存泄漏
         WebSocketManager.setMessageDisplayFragment(null)
         // 移除监听器
         WebSocketManager.removeSessionUpdateListener(sessionUpdateListener)
+        WebSocketManager.removeFriendDeletedListener(friendDeletedListener)
     }
 
     private fun updateSessionWithNewMessage(message: ChatMessage) {
         // 判断消息类型（私聊/群聊）
-        val sessionId = when {
+        val sessionId: Long = when {
             message.groupId != null -> message.groupId
-            message.senderId == UserPreferences.getUserId(requireContext()) -> message.receiverId
-            else -> message.senderId
+            message.senderId == UserPreferences.getUserId(requireContext()) -> message.receiverId ?: 0L
+            else -> message.senderId ?: 0L
+        }
+        
+        // 获取会话名称
+        val sessionName: String = when {
+            message.groupId != null -> (ApiClient.apiService.getGroupById(message.groupId) ?: "未知群组").toString()
+            message.senderId == UserPreferences.getUserId(requireContext()) -> message.receiverName ?: "未知用户"
+            else -> message.senderName ?: "未知用户"
         }
         
         // 查找现有会话
@@ -156,7 +181,7 @@ class MessageDisplayFragment : Fragment() {
                     lastMessage = message.content,
                     lastMessageTime = it,
                     unreadCount = existingSession.unreadCount +
-                            if (message.senderId != UserPreferences.getUserId(requireContext())) 1 else 0
+                        if (message.senderId != UserPreferences.getUserId(requireContext())) 1 else 0
                 )
             }
             
@@ -164,12 +189,25 @@ class MessageDisplayFragment : Fragment() {
             sessions.remove(existingSession)
             // 将更新后的会话添加到列表开头
             updatedSession?.let { sessions.add(0, it) }
-            
-            // 通知适配器更新
-            adapter.updateSessions(sessions)
         } else {
-            // 如果会话不存在，重新加载所有会话
-            loadSessions()
+            // 创建新会话
+            message.timestamp?.let { timestamp ->
+                val newSession = MessageSession(
+                    id = 0, // 临时ID，服务器会分配真实ID
+                    partnerId = sessionId,
+                    partnerName = sessionName,
+                    lastMessage = message.content,
+                    lastMessageTime = timestamp,
+                    unreadCount = 1,
+                    type = if (message.groupId != null) "GROUP" else "PRIVATE",
+                    partnerAvatar = null // 可以后续更新头像
+                )
+                // 将新会话添加到列表开头
+                sessions.add(0, newSession)
+            }
         }
+        
+        // 通知适配器更新
+        adapter.updateSessions(sessions)
     }
 } 

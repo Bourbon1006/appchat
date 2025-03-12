@@ -154,6 +154,21 @@ interface ApiService {
     suspend fun markMessageAsRead(
         @Path("messageId") messageId: Long
     ): Response<Unit>
+
+    @DELETE("api/friends")
+    suspend fun deleteFriend(
+        @Query("userId") userId: Long,
+        @Query("friendId") friendId: Long
+    ): Response<Unit>
+
+    @DELETE("api/sessions/private")
+    suspend fun deletePrivateSession(
+        @Query("userId") userId: Long,
+        @Query("partnerId") partnerId: Long
+    ): Response<Unit>
+
+    @GET("api/users/{userId}/contacts")
+    suspend fun getFriends(@Path("userId") userId: Long): Response<List<UserDTO>>
 }
 
 data class DeleteMessageResponse(

@@ -1,8 +1,5 @@
 package org.example.appchathandler.service
 
-import org.example.appchathandler.entity.Message
-import org.example.appchathandler.entity.MessageType
-import org.example.appchathandler.entity.Group
 import org.example.appchathandler.repository.MessageRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -14,11 +11,10 @@ import org.example.appchathandler.model.MessageType as ModelMessageType
 import org.example.appchathandler.repository.MessageReadStatusRepository
 import org.example.appchathandler.repository.UserRepository
 import org.example.appchathandler.dto.MessageSessionDTO
-import org.example.appchathandler.entity.User
 import org.example.appchathandler.dto.MessageSessionInfo
+import org.example.appchathandler.entity.*
 import org.example.appchathandler.repository.GroupRepository
 import org.springframework.beans.factory.annotation.Autowired
-import org.example.appchathandler.entity.MessageReadStatus
 import org.example.appchathandler.service.EventService
 import org.example.appchathandler.websocket.ChatWebSocketHandler
 import org.springframework.context.annotation.Lazy
@@ -360,5 +356,18 @@ class MessageService(
         message.readBy.add(readStatus)
         
         return messageRepository.save(message)
+    }
+
+    @Transactional
+    fun deletePrivateMessages(userId: Long, friendId: Long) {
+        // 删除双方之间的所有私聊消息
+        messageRepository.deleteByPrivateChat(userId, friendId)
+    }
+
+    @Transactional
+    fun deletePrivateSession(userId: Long, friendId: Long) {
+        // 删除双方的会话记录
+        messageRepository.deleteByUserIdAndPartnerId(userId, friendId)
+        messageRepository.deleteByUserIdAndPartnerId(friendId, userId)
     }
 } 

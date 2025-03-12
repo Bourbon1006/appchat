@@ -34,6 +34,7 @@ class WebSocketManager {
         private var currentUserId: Long = 0
         private val coroutineScope = CoroutineScope(Dispatchers.Main + Job())
         private var messageDisplayFragment: MessageDisplayFragment? = null
+        private val friendDeletedListeners = CopyOnWriteArrayList<(Long) -> Unit>()
 
         data class WebSocketResponse(
             val type: String,
@@ -204,6 +205,12 @@ class WebSocketManager {
                                 friendRequestListeners.forEach { it(friendRequest) }
                             }
                         }
+                        "friendDeleted" -> {
+                            val friendId = jsonObject.getLong("friendId")
+                            coroutineScope.launch(Dispatchers.Main) {
+                                friendDeletedListeners.forEach { it(friendId) }
+                            }
+                        }
                         // 尝试解析为 WebSocketResponse
                         else -> {
                             val response = gson.fromJson(text, WebSocketResponse::class.java)
@@ -314,6 +321,14 @@ class WebSocketManager {
         // 移除会话更新监听器
         fun removeSessionUpdateListener(listener: (ChatMessage) -> Unit) {
             sessionUpdateListeners.remove(listener)
+        }
+
+        fun addFriendDeletedListener(listener: (Long) -> Unit) {
+            friendDeletedListeners.add(listener)
+        }
+
+        fun removeFriendDeletedListener(listener: (Long) -> Unit) {
+            friendDeletedListeners.remove(listener)
         }
     }
 }

@@ -9,6 +9,8 @@ interface MessageSessionInfo {
     val partnerAvatar: String?
     val lastMessage: String
     val lastMessageTime: LocalDateTime
-    val type: String
+    enum class Type {
+        GROUP, PRIVATE
+    }
     val unreadCount: Int
 } 

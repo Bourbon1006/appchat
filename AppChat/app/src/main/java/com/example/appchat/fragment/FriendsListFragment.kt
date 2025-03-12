@@ -9,90 +9,127 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.appchat.ChatActivity
 import com.example.appchat.R
 import com.example.appchat.adapter.ContactAdapter
 import com.example.appchat.api.ApiClient
+import com.example.appchat.databinding.FragmentFriendsListBinding
+import com.example.appchat.model.Contact
 import com.example.appchat.model.UserDTO
 import com.example.appchat.util.UserPreferences
+import kotlinx.coroutines.launch
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
 
 class FriendsListFragment : Fragment() {
-    private lateinit var contactsList: RecyclerView
-    private lateinit var progressBar: ProgressBar
-    private lateinit var searchInput: EditText
-    private lateinit var searchButton: Button
+    private var _binding: FragmentFriendsListBinding? = null
+    private val binding get() = _binding!!
     private lateinit var adapter: ContactAdapter
+    private val contacts = mutableListOf<Contact>()
 
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
-    ): View? {
-        val view = inflater.inflate(R.layout.fragment_friends_list, container, false)
-
-        contactsList = view.findViewById(R.id.contactsList)
-        progressBar = view.findViewById(R.id.progressBar)
-        searchInput = view.findViewById(R.id.searchInput)
-        searchButton = view.findViewById(R.id.searchButton)
-
-        setupRecyclerView()
-        loadContacts()
-        setupSearchButton()
-
-        return view
+    ): View {
+        _binding = FragmentFriendsListBinding.inflate(inflater, container, false)
+        return binding.root
     }
 
-    private fun setupRecyclerView() {
-        adapter = ContactAdapter { contact ->
-            val intent = Intent(requireContext(), ChatActivity::class.java).apply {
-                putExtra("receiver_id", contact.id)
-                putExtra("receiver_name", contact.username)
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+
+        adapter = ContactAdapter(
+            contacts = contacts,
+            onItemClick = { contact ->
+                navigateToChat(contact.id, contact.name, contact.avatarUrl)
             }
-            startActivity(intent)
+        )
+        binding.contactsList.adapter = adapter
+        binding.contactsList.layoutManager = LinearLayoutManager(context)
+
+        loadContacts()
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        _binding = null
+    }
+
+    private fun navigateToChat(userId: Long, userName: String, userAvatar: String) {
+        val intent = Intent(requireContext(), ChatActivity::class.java).apply {
+            putExtra("receiver_id", userId)
+            putExtra("receiver_name", userName)
+            putExtra("partnerAvatar", userAvatar)
+            putExtra("chat_type", "PRIVATE")
         }
-        contactsList.apply {
-            layoutManager = LinearLayoutManager(context)
-            this.adapter = this@FriendsListFragment.adapter
-        }
+        startActivity(intent)
     }
 
     private fun loadContacts() {
-        progressBar.visibility = View.VISIBLE
-        ApiClient.apiService.getUserContacts(UserPreferences.getUserId(requireContext()))
-            .enqueue(object : Callback<List<UserDTO>> {
-                override fun onResponse(call: Call<List<UserDTO>>, response: Response<List<UserDTO>>) {
-                    progressBar.visibility = View.GONE
-                    if (response.isSuccessful) {
-                        response.body()?.let { users ->
-                            adapter.updateContacts(users)
-                        }
-                    }
+        val userId = UserPreferences.getUserId(requireContext())
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val response = ApiClient.apiService.getFriends(userId)
+                if (response.isSuccessful) {
+                    contacts.clear()
+                    contacts.addAll(response.body()?.map { user ->
+                        Contact(
+                            id = user.id,
+                            name = user.nickname ?: user.username,
+                            avatarUrl = user.avatarUrl ?: "",
+                            isOnline = user.isOnline
+                        )
+                    } ?: emptyList())
+                    adapter.notifyDataSetChanged()
                 }
-
-                override fun onFailure(call: Call<List<UserDTO>>, t: Throwable) {
-                    progressBar.visibility = View.GONE
-                    Toast.makeText(context, "加载联系人失败", Toast.LENGTH_SHORT).show()
-                }
-            })
-    }
-
-    private fun setupSearchButton() {
-        searchButton.setOnClickListener {
-            val query = searchInput.text.toString().trim()
-            if (query.isNotEmpty()) {
-                searchUsers(query)
+            } catch (e: Exception) {
+                Toast.makeText(context, "加载联系人失败: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    private fun searchUsers(query: String) {
-        progressBar.visibility = View.VISIBLE
-        loadContacts() // 暂时使用加载所有联系人的方式
+    private fun showFriendOptionsDialog(contact: UserDTO) {
+        AlertDialog.Builder(requireContext())
+            .setTitle(contact.username)
+            .setItems(arrayOf("发送消息", "删除好友")) { _, which ->
+                when (which) {
+                    0 -> navigateToChat(contact.id, contact.nickname ?: contact.username, contact.avatarUrl ?: "")
+                    1 -> showDeleteFriendConfirmDialog(contact)
+                }
+            }
+            .show()
+    }
+
+    private fun showDeleteFriendConfirmDialog(contact: UserDTO) {
+        AlertDialog.Builder(requireContext())
+            .setTitle("删除好友")
+            .setMessage("确定要删除好友 ${contact.username} 吗？")
+            .setPositiveButton("确定") { _, _ ->
+                deleteFriend(contact.id)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun deleteFriend(friendId: Long) {
+        lifecycleScope.launch {
+            try {
+                ApiClient.apiService.deleteFriend(
+                    userId = UserPreferences.getUserId(requireContext()),
+                    friendId = friendId
+                )
+                Toast.makeText(context, "删除成功", Toast.LENGTH_SHORT).show()
+                loadContacts() // 重新加载好友列表
+            } catch (e: Exception) {
+                Toast.makeText(context, "删除失败: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 } 

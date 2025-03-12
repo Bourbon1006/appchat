@@ -53,6 +53,7 @@ class ChatActivity : AppCompatActivity() {
     private var currentReceiverId: Long = 0
     private var currentGroupId: Long = -1
     private var title: String = ""
+    private var partnerId: Long = -1
 
     // ActivityResultLauncher for file picking
     private val filePickerLauncher: ActivityResultLauncher<String> = registerForActivityResult(
@@ -64,6 +65,15 @@ class ChatActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_chat)
+
+        partnerId = intent.getLongExtra("receiver_id", -1)
+        println("🔄 Intent Extras: ${intent.extras}")
+        if (partnerId == -1L) {
+            // 处理错误情况，例如显示错误消息或返回上一个页面
+            Toast.makeText(this, "无法获取聊天对象的ID", Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
 
         // 首先初始化所有视图
         initViews()
@@ -114,10 +124,7 @@ class ChatActivity : AppCompatActivity() {
         markSessionAsRead()
 
         // 添加日志
-        println("📝 ChatActivity created with intent extras: ${intent.extras?.keySet()?.joinToString()}")
-        println("📝 chat_type: ${intent.getStringExtra("chat_type")}")
-        println("📝 group_id: ${intent.getLongExtra("group_id", -1)}")
-        println("📝 group_name: ${intent.getStringExtra("group_name")}")
+
     }
 
     private fun initViews() {
@@ -457,6 +464,10 @@ class ChatActivity : AppCompatActivity() {
                 showSearchMessagesDialog()
                 true
             }
+            R.id.action_delete_friend -> {
+                showDeleteFriendConfirmDialog()
+                true
+            }
             else -> super.onOptionsItemSelected(item)
         }
     }
@@ -522,6 +533,8 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.chat_menu, menu)
+        // 只在私聊时显示删除好友选项
+        menu.findItem(R.id.action_delete_friend)?.isVisible = currentChatType == "PRIVATE"
         return true
     }
 
@@ -757,6 +770,33 @@ class ChatActivity : AppCompatActivity() {
                 println("✅ Successfully marked messages as read")
             } catch (e: Exception) {
                 println("❌ Error marking messages as read: ${e.message}")
+            }
+        }
+    }
+
+    private fun showDeleteFriendConfirmDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("删除好友")
+            .setMessage("确定要删除好友 ${title} 吗？")
+            .setPositiveButton("确定") { _, _ ->
+                deleteFriend()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun deleteFriend() {
+        lifecycleScope.launch {
+            try {
+                ApiClient.apiService.deleteFriend(
+                    userId = UserPreferences.getUserId(this@ChatActivity),
+                    friendId = currentReceiverId
+                )
+                Toast.makeText(this@ChatActivity, "删除成功", Toast.LENGTH_SHORT).show()
+                // 返回上一页
+                finish()
+            } catch (e: Exception) {
+                Toast.makeText(this@ChatActivity, "删除失败: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }

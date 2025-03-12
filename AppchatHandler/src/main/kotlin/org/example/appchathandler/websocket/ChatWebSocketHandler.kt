@@ -23,6 +23,7 @@ import com.fasterxml.jackson.core.type.TypeReference
 import org.springframework.context.event.EventListener
 import org.example.appchathandler.event.SessionsUpdateEvent
 import org.example.appchathandler.event.FriendRequestEvent
+import org.json.JSONObject
 
 @Component
 class ChatWebSocketHandler(
@@ -466,5 +467,16 @@ class ChatWebSocketHandler(
         } else {
             println("⚠️ No active session found for user $receiverId (session=${session}, isOpen=${session?.isOpen})")
         }
+    }
+
+    fun notifyFriendDeleted(userId: Long, deletedFriendId: Long) {
+        val session = sessions[userId] ?: return
+        
+        val message = JSONObject().apply {
+            put("type", "friendDeleted")
+            put("friendId", deletedFriendId)
+        }
+        
+        session.sendMessage(TextMessage(message.toString()))
     }
 }

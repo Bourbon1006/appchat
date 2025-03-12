@@ -79,6 +79,8 @@ import com.example.appchat.fragment.MessageDisplayFragment
 import com.example.appchat.websocket.WebSocketManager
 import androidx.fragment.app.Fragment
 import org.json.JSONObject
+import com.example.appchat.databinding.DialogContactsBinding
+import com.example.appchat.model.Contact
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webSocket: WebSocket
@@ -167,6 +169,16 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // 确保 WebSocket 连接
+        if (!WebSocketManager.isConnected()) {
+            val serverUrl = "http://192.168.31.194:8080/ws"
+            WebSocketManager.init(
+                serverUrl = serverUrl,
+                userId = UserPreferences.getUserId(this)
+            )
+        }
+        
         setContentView(R.layout.activity_main)
 
         // 初始化userId
@@ -469,41 +481,22 @@ class MainActivity : AppCompatActivity() {
         currentUserAdapter?.updateUserStatus(user)
     }
 
-    private fun showContactsDialog() {
-        updateToolbarTitle("联系人")
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("联系人")
-            .create()
+    /*private fun showContactsDialog() {
+        val contacts = mutableListOf<Contact>()  // 初始化空列表
+        val dialog = Dialog(this)
+        val binding = DialogContactsBinding.inflate(layoutInflater)
+        dialog.setContentView(binding.root)
 
-        val view = layoutInflater.inflate(R.layout.dialog_contacts, null)
-        val contactsList = view.findViewById<RecyclerView>(R.id.contactsList)
-        contactsList.layoutManager = LinearLayoutManager(this)
-
-        val adapter = ContactAdapter { contact ->
-            dialog.dismiss()
-            startPrivateChat(contact.id, contact.username)
-        }
-        contactsList.adapter = adapter
-
-        // 加载联系人列表
-        apiService.getUserContacts(UserPreferences.getUserId(this))
-            .enqueue(object : Callback<List<UserDTO>> {
-                override fun onResponse(call: Call<List<UserDTO>>, response: Response<List<UserDTO>>) {
-                    if (response.isSuccessful) {
-                        response.body()?.let { users ->
-                            adapter.updateContacts(users)
-                        }
-                    }
-                }
-
-                override fun onFailure(call: Call<List<UserDTO>>, t: Throwable) {
-                    Toast.makeText(this@MainActivity, "加载联系人失败", Toast.LENGTH_SHORT).show()
-                }
-            })
-
-        dialog.setView(view)
-        dialog.show()
-    }
+        val adapter = ContactAdapter(
+            contacts = contacts,
+            onItemClick = { contact ->
+                // 处理点击事件
+                navigateToChat(contact.id, contact.name, contact.avatarUrl)
+            }
+        )
+        binding.contactsList.adapter = adapter
+        // ...其他代码
+    }*/
 
     /*private fun showSearchDialog() {
         val dialog = AlertDialog.Builder(this)

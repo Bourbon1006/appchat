@@ -37,7 +37,8 @@ dependencies {
     implementation("io.jsonwebtoken:jjwt:0.9.1") // 添加JWT库
     implementation("javax.xml.bind:jaxb-api:2.3.1")
     implementation("org.glassfish.jaxb:jaxb-runtime:2.3.1")
-    
+    implementation("org.json:json:20231013")
+    implementation("jakarta.persistence:jakarta.persistence-api:3.1.0")
 }
 
 kotlin {

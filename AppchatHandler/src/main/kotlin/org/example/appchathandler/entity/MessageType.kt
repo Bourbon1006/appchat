@@ -4,5 +4,7 @@ enum class MessageType {
     TEXT,
     FILE,
     IMAGE,
-    VIDEO
-} 
+    VIDEO,
+    PRIVATE,
+    GROUP
+}
