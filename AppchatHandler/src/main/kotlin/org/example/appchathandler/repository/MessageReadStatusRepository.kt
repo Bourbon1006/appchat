@@ -2,6 +2,7 @@ package org.example.appchathandler.repository
 
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
+import org.springframework.data.jpa.repository.Modifying
 import org.springframework.stereotype.Repository
 import org.example.appchathandler.entity.Message
 import org.example.appchathandler.entity.MessageReadStatus
@@ -45,4 +46,8 @@ interface MessageReadStatusRepository : JpaRepository<MessageReadStatus, Long> {
     fun isMessageReadByUser(messageId: Long, userId: Long): Boolean
 
     fun existsByMessageIdAndUserId(messageId: Long, userId: Long): Boolean
+
+    @Modifying
+    @Query("DELETE FROM MessageReadStatus mrs WHERE mrs.message.id = :messageId")
+    fun deleteByMessageId(messageId: Long)
 } 

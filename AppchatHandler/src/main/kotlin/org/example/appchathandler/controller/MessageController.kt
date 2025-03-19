@@ -84,17 +84,32 @@ class MessageController(
         @PathVariable messageId: Long,
         @RequestParam userId: Long
     ): ResponseEntity<DeleteMessageResponse> {
-        val message = messageService.findById(messageId) ?: return ResponseEntity.notFound().build()
+        return try {
+            val message = messageService.findById(messageId) 
+                ?: return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(DeleteMessageResponse(false, "Message not found"))
 
-        // 先标记消息为该用户已删除，并检查是否所有用户都已删除
-        val allDeleted = messageService.markMessageAsDeleted(messageId, userId)
+            // Check if user has permission to delete this message
+            if (!messageService.canUserDeleteMessage(userId, message)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(DeleteMessageResponse(false, "User does not have permission to delete this message"))
+            }
 
-        return if (allDeleted) {
-            // 如果所有用户都删除了这条消息，则彻底删除
-            messageService.deleteMessageCompletely(messageId)
-            ResponseEntity.ok(DeleteMessageResponse(true))
-        } else {
-            ResponseEntity.ok(DeleteMessageResponse(false))
+            // Mark message as deleted and check if all users have deleted it
+            val allDeleted = messageService.markMessageAsDeleted(messageId, userId)
+
+            if (allDeleted) {
+                // If all users deleted the message, completely remove it
+                messageService.deleteMessageCompletely(messageId)
+                ResponseEntity.ok(DeleteMessageResponse(true, "Message completely deleted"))
+            } else {
+                ResponseEntity.ok(DeleteMessageResponse(false, "Message marked as deleted for user"))
+            }
+        } catch (e: Exception) {
+            println("❌ Error deleting message: ${e.message}")
+            e.printStackTrace()
+            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(DeleteMessageResponse(false, "Error processing delete request"))
         }
     }
 

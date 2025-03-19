@@ -1,5 +1,6 @@
 package org.example.appchathandler.dto
 
 data class DeleteMessageResponse(
-    val isFullyDeleted: Boolean
+    val success: Boolean,
+    val message: String? = null
 ) 

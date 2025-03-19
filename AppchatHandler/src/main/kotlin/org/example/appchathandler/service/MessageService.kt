@@ -157,10 +157,21 @@ class MessageService(
         }
     }
 
-
     @Transactional
     fun deleteMessageCompletely(messageId: Long) {
-        messageRepository.isMessageDeletedForAllUsers(messageId)
+        try {
+            // First, delete all read status entries for this message
+            messageReadStatusRepository.deleteByMessageId(messageId)
+            
+            // Then delete the message itself
+            messageRepository.deleteById(messageId)
+            
+            println("✅ Message $messageId completely deleted")
+        } catch (e: Exception) {
+            println("❌ Error deleting message completely: ${e.message}")
+            e.printStackTrace()
+            throw e
+        }
     }
 
     @Transactional
@@ -192,29 +203,37 @@ class MessageService(
         return messageRepository.findById(messageId).orElse(null)
     }
 
+    @Transactional
     fun markMessageAsDeleted(messageId: Long, userId: Long): Boolean {
-        val message = findById(messageId) ?: return false
-        
-        // 如果是群聊消息，直接删除
-        if (message.group != null) {
-            messageRepository.deleteById(messageId)
-            return true
-        }
+        return try {
+            val message = messageRepository.findById(messageId).orElse(null) 
+                ?: return false
 
-        // 如果是私聊消息，标记为该用户已删除
-        val deletedUsers = message.deletedForUsers.toMutableSet()
-        deletedUsers.add(userId)
-        message.deletedForUsers = deletedUsers
-        messageRepository.save(message)
+            // For group messages, mark as deleted for this user
+            if (message.group != null) {
+                val deletedUsers = HashSet(message.deletedForUsers)
+                deletedUsers.add(userId)
+                message.deletedForUsers = deletedUsers
+                messageRepository.save(message)
+                return true
+            }
 
-        // 检查是否所有相关用户都已删除
-        val allUsers = setOfNotNull(message.sender.id, message.receiver?.id)
-        
-        return if (allUsers.all { userId -> deletedUsers.contains(userId) }) {
-            // 如果所有用户都已删除，从数据库中完全删除
-            messageRepository.deleteById(messageId)
-            true
-        } else {
+            // For private messages
+            val deletedUsers = HashSet(message.deletedForUsers)
+            deletedUsers.add(userId)
+            message.deletedForUsers = deletedUsers
+            messageRepository.save(message)
+
+            // Check if all relevant users have deleted the message
+            val allRelevantUsers = setOfNotNull(
+                message.sender.id,
+                message.receiver?.id
+            )
+
+            allRelevantUsers.all { deletedUsers.contains(it) }
+        } catch (e: Exception) {
+            println("❌ Error marking message as deleted: ${e.message}")
+            e.printStackTrace()
             false
         }
     }
@@ -356,5 +375,30 @@ class MessageService(
         }
         
         return sessions.sortedByDescending { it.lastMessageTime }
+    }
+
+    fun canUserDeleteMessage(userId: Long, message: Message): Boolean {
+        return try {
+            // User can delete if they are the sender
+            if (message.sender.id == userId) {
+                return true
+            }
+
+            // For private messages, receiver can also delete
+            if (message.receiver != null && message.group == null && message.receiver!!.id == userId) {
+                return true
+            }
+
+            // For group messages, check if user is a member of the group
+            if (message.group != null) {
+                return groupRepository.existsByGroupIdAndMemberId(message.group!!.id, userId)
+            }
+
+            false
+        } catch (e: Exception) {
+            println("❌ Error checking message delete permission: ${e.message}")
+            e.printStackTrace()
+            false
+        }
     }
 }
