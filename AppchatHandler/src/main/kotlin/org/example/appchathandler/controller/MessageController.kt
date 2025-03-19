@@ -210,6 +210,39 @@ class MessageController(
         }
     }
 
+    @PostMapping("/private/read")
+    fun markPrivateMessagesAsRead(
+        @RequestParam userId: Long,
+        @RequestParam partnerId: Long
+    ): ResponseEntity<Void> {
+        return try {
+            println("📬 Marking private messages as read: userId=$userId, partnerId=$partnerId")
+            messageService.markPrivateMessagesAsRead(userId, partnerId)
+            println("✅ Successfully marked private messages as read")
+            ResponseEntity.ok().build()
+        } catch (e: Exception) {
+            println("❌ Error marking messages as read: ${e.message}")
+            e.printStackTrace()
+            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
+        }
+    }
+
+    @PostMapping("/group/read")
+    fun markGroupMessagesAsRead(
+        @RequestParam userId: Long,
+        @RequestParam groupId: Long
+    ): ResponseEntity<Void> {
+        return try {
+            println("📬 Marking group messages as read: userId=$userId, groupId=$groupId")
+            messageService.markGroupMessagesAsRead(userId, groupId)
+            println("✅ Successfully marked group messages as read")
+            ResponseEntity.ok().build()
+        } catch (e: Exception) {
+            println("❌ Error marking messages as read: ${e.message}")
+            e.printStackTrace()
+            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
+        }
+    }
     @PostMapping("/read")
     fun markSessionAsRead(
         @RequestParam userId: Long,
@@ -231,4 +264,4 @@ class MessageController(
             ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
         }
     }
-} 
+}

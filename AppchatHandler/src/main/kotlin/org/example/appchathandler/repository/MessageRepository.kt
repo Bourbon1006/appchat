@@ -309,4 +309,31 @@ interface MessageRepository : JpaRepository<Message, Long> {
     """)
     fun deleteByUserIdAndPartnerId(userId: Long, partnerId: Long)
 
+    @Query("""
+        SELECT m FROM Message m 
+        WHERE (m.sender.id = :userId OR m.receiver.id = :userId)
+        AND m.group IS NULL
+        AND m.id IN (
+            SELECT MAX(m2.id) FROM Message m2 
+            WHERE (m2.sender.id = :userId OR m2.receiver.id = :userId)
+            AND m2.group IS NULL
+            GROUP BY 
+                CASE 
+                    WHEN m2.sender.id = :userId THEN m2.receiver.id 
+                    ELSE m2.sender.id 
+                END
+        )
+    """)
+    fun findLatestPrivateMessagesByUser(@Param("userId") userId: Long): List<Message>
+
+    @Query("""
+        SELECT m FROM Message m 
+        WHERE m.group.id IN (SELECT g.id FROM Group g JOIN g.members m WHERE m.id = :userId)
+        AND m.id IN (
+            SELECT MAX(m2.id) FROM Message m2 
+            WHERE m2.group.id IN (SELECT g2.id FROM Group g2 JOIN g2.members m2 WHERE m2.id = :userId)
+            GROUP BY m2.group.id
+        )
+    """)
+    fun findLatestGroupMessagesByUser(@Param("userId") userId: Long): List<Message>
 }

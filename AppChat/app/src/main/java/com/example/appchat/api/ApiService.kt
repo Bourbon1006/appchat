@@ -161,6 +161,18 @@ interface ApiService {
         @Query("friendId") friendId: Long
     ): Response<Unit>
 
+    @POST("/api/messages/group/{groupId}/read")
+    suspend fun markGroupMessagesAsRead(
+        @Path("groupId") groupId: Long,
+        @Query("userId") userId: Long
+    ): Response<Unit>
+
+    @POST("api/messages/private/read")
+    suspend fun markPrivateMessagesAsRead(
+        @Query("userId") userId: Long,
+        @Query("partnerId") partnerId: Long
+    ): Response<Unit>
+
     @DELETE("api/sessions/private")
     suspend fun deletePrivateSession(
         @Query("userId") userId: Long,

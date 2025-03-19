@@ -1,96 +1,96 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:padding="8dp"
-    android:clickable="true"
-    android:focusable="true"
-    android:background="?android:attr/selectableItemBackground">
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:orientation="vertical"
+              android:padding="8dp"
+              android:clickable="true"
+              android:focusable="true"
+              android:background="?android:attr/selectableItemBackground">
 
     <LinearLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="start"
-        android:orientation="horizontal">
-
-        <ImageView
-            android:id="@+id/avatar"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_marginEnd="8dp" />
-
-        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="vertical">
+            android:layout_gravity="start"
+            android:orientation="horizontal">
 
-            <TextView
-                android:id="@+id/senderName"
+        <ImageView
+                android:id="@+id/avatar"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp" />
+
+        <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="12sp"
-                android:textColor="#666666"
-                android:layout_marginBottom="2dp"
-                android:visibility="gone" />
+                android:orientation="vertical">
+
+            <TextView
+                    android:id="@+id/senderName"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="12sp"
+                    android:textColor="#666666"
+                    android:layout_marginBottom="2dp"
+                    android:visibility="gone" />
 
             <FrameLayout
-                android:id="@+id/messageContainer"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content">
+                    android:id="@+id/messageContainer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content">
 
                 <TextView
-                    android:id="@+id/messageText"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:background="@drawable/bg_message_received"
-                    android:padding="8dp"
-                    android:textColor="@android:color/black" />
-
-                <FrameLayout
-                    android:id="@+id/fileContainer"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:visibility="gone"
-                    android:background="@drawable/bg_message_received">
-
-                    <ImageView
-                        android:id="@+id/fileIcon"
+                        android:id="@+id/messageText"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:adjustViewBounds="true"
-                        android:maxWidth="240dp"
-                        android:maxHeight="240dp"
-                        android:minWidth="120dp"
-                        android:minHeight="120dp"
-                        android:scaleType="fitCenter"
-                        android:padding="4dp" />
+                        android:background="@drawable/bg_message_received"
+                        android:padding="8dp"
+                        android:textColor="@android:color/black" />
+
+                <FrameLayout
+                        android:id="@+id/fileContainer"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone"
+                        android:background="@drawable/bg_message_received">
 
                     <ImageView
-                        android:id="@+id/playIcon"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:layout_gravity="center"
-                        android:src="@drawable/ic_play"
-                        android:visibility="gone" />
+                            android:id="@+id/fileIcon"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:adjustViewBounds="true"
+                            android:maxWidth="240dp"
+                            android:maxHeight="240dp"
+                            android:minWidth="120dp"
+                            android:minHeight="120dp"
+                            android:scaleType="fitCenter"
+                            android:padding="4dp" />
+
+                    <ImageView
+                            android:id="@+id/playIcon"
+                            android:layout_width="48dp"
+                            android:layout_height="48dp"
+                            android:layout_gravity="center"
+                            android:src="@drawable/ic_play"
+                            android:visibility="gone" />
                 </FrameLayout>
             </FrameLayout>
 
             <TextView
-                android:id="@+id/timeText"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="12sp"
-                android:visibility="gone"
-                android:layout_marginTop="4dp" />
+                    android:id="@+id/timeText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="12sp"
+                    android:visibility="gone"
+                    android:layout_marginTop="4dp" />
         </LinearLayout>
 
         <CheckBox
-            android:id="@+id/messageCheckbox"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom"
-            android:visibility="gone"
-            android:layout_marginStart="8dp" />
+                android:id="@+id/messageCheckbox"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom"
+                android:visibility="gone"
+                android:layout_marginStart="8dp" />
     </LinearLayout>
 </LinearLayout> 

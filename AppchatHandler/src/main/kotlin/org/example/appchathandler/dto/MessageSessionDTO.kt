@@ -3,12 +3,12 @@ package org.example.appchathandler.dto
 import java.time.LocalDateTime
 
 data class MessageSessionDTO(
-    val id: Long,
-    val partnerId: Long,
-    val partnerName: String,
-    val partnerAvatar: String?,
-    val lastMessage: String,
-    val lastMessageTime: LocalDateTime,
-    val unreadCount: Int,
-    val type: String
-) 
+    override val id: Long,
+    override val partnerId: Long,
+    override val partnerName: String,
+    override val partnerAvatar: String?,
+    override val lastMessage: String,
+    override val lastMessageTime: LocalDateTime,
+    override val unreadCount: Int,
+    val type: MessageSessionInfo.Type  // 改用枚举类型
+) : MessageSessionInfo

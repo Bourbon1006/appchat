@@ -85,7 +85,7 @@ class MessageDisplayFragment : Fragment() {
 
     private fun navigateToChat(session: MessageSession) {
         startActivity(Intent(context, ChatActivity::class.java).apply {
-            when (session.type.uppercase()) {
+            when (session.type?.uppercase() ?: "PRIVATE") {
                 "GROUP" -> {
                     putExtra("chat_type", "GROUP")
                     putExtra("group_id", session.partnerId)
@@ -210,4 +210,4 @@ class MessageDisplayFragment : Fragment() {
         // 通知适配器更新
         adapter.updateSessions(sessions)
     }
-} 
+}

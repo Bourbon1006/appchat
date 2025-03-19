@@ -126,24 +126,54 @@ class WebSocketManager {
         }
 
         private fun handleNewMessage(message: ChatMessage) {
-            println("📨 Received new message: senderId=${message.senderId}, receiverId=${message.receiverId}, currentUserId=$currentUserId")
+            println("📨 Received new message: senderId=${message.senderId}, receiverId=${message.receiverId}, groupId=${message.groupId}, currentUserId=$currentUserId, currentChatPartnerId=$currentChatPartnerId")
 
-            // 只有在以下情况才标记为已读：
-            // 1. 消息是发给当前用户的
-            // 2. 当前正在与发送者聊天
-            if (message.receiverId == currentUserId && message.senderId == currentChatPartnerId) {
-                // 标记为已读的逻辑
+            // 检查消息类型是否匹配当前会话
+            val isCurrentSession = if (message.groupId != null) {
+                // 群聊消息：只在群聊会话中显示
+                message.groupId == currentChatPartnerId
+            } else {
+                // 私聊消息：只在私聊会话中显示
+                currentChatPartnerId != 0L && message.groupId == null &&
+                ((message.senderId == currentUserId && message.receiverId == currentChatPartnerId) ||
+                (message.senderId == currentChatPartnerId && message.receiverId == currentUserId))
+            }
+
+            if (!isCurrentSession) {
+                println("⚠️ Message does not belong to current session, skipping...")
+                return
+            }
+
+            // 检查是否需要标记为已读
+            val shouldMarkAsRead = if (message.groupId != null) {
+                message.groupId == currentChatPartnerId
+            } else {
+                message.receiverId == currentUserId && message.senderId == currentChatPartnerId
+            }
+
+            if (shouldMarkAsRead) {
+                println("✅ Message qualifies for read status update")
                 coroutineScope.launch {
                     try {
-                        ApiClient.apiService.markSessionAsRead(
+                        println("📝 Calling markSessionAsRead API...")
+                        val response = ApiClient.apiService.markSessionAsRead(
                             userId = currentUserId,
-                            partnerId = currentChatPartnerId,
+                            partnerId = if (message.groupId != null) message.groupId else currentChatPartnerId,
                             type = if (message.groupId != null) "GROUP" else "PRIVATE"
                         )
+                        println("✅ markSessionAsRead API response: $response")
+                        
+                        // API 调用成功后立即获取并更新会话列表
+                        val sessions = ApiClient.apiService.getMessageSessions(currentUserId)
+                        messageDisplayFragment?.updateSessions(sessions)
+                        
                     } catch (e: Exception) {
                         println("❌ Error marking message as read: ${e.message}")
+                        e.printStackTrace()
                     }
                 }
+            } else {
+                println("❌ Message does not qualify for read status update: groupId=${message.groupId}, receiverId=${message.receiverId}, senderId=${message.senderId}, currentChatPartnerId=$currentChatPartnerId")
             }
 
             // 通知所有监听器
@@ -152,8 +182,33 @@ class WebSocketManager {
         }
 
         fun setCurrentChat(userId: Long, partnerId: Long) {
+            println("🔄 Setting current chat: userId=$userId, partnerId=$partnerId (previous partnerId=$currentChatPartnerId)")
             currentChatPartnerId = partnerId
-            // 不在这里设置 currentUserId，因为它应该在 init 时就设置好
+
+            // 只有当 partnerId 不为 0 时才标记为已读
+            if (partnerId != 0L) {
+                coroutineScope.launch {
+                    try {
+                        println("📝 Marking session as read when entering chat...")
+                        val response = ApiClient.apiService.markSessionAsRead(
+                            userId = userId,
+                            partnerId = partnerId,
+                            type = "PRIVATE"  // 如果是群聊，这里需要判断
+                        )
+                        println("✅ markSessionAsRead API response when entering chat: $response")
+                        
+                        // API 调用成功后立即获取并更新会话列表
+                        val sessions = ApiClient.apiService.getMessageSessions(userId)
+                        messageDisplayFragment?.updateSessions(sessions)
+                        
+                    } catch (e: Exception) {
+                        println("❌ Error marking session as read when entering chat: ${e.message}")
+                        e.printStackTrace()
+                    }
+                }
+            } else {
+                println("⚠️ Skipping markSessionAsRead because partnerId is 0")
+            }
         }
 
         fun setMessageDisplayFragment(fragment: MessageDisplayFragment?) {
@@ -180,15 +235,14 @@ class WebSocketManager {
                     val type = jsonObject.getString("type")
                     
                     when (type) {
-                        "sessions_update" -> {
-                            val sessionsJson = jsonObject.getJSONArray("sessions")
-                            val sessions = gson.fromJson(
-                                sessionsJson.toString(),
-                                Array<MessageSession>::class.java
-                            ).toList()
-
-                            // 在主线程中更新 UI
+                        "sessions_update", "message_read" -> {
                             coroutineScope.launch(Dispatchers.Main) {
+                                // 获取最新的会话列表
+                                val sessions = jsonObject.optJSONArray("sessions")?.let {
+                                    gson.fromJson(it.toString(), Array<MessageSession>::class.java).toList()
+                                } ?: emptyList()
+                                
+                                // 直接更新会话列表
                                 messageDisplayFragment?.updateSessions(sessions)
                             }
                         }

@@ -418,7 +418,7 @@ class MessageAdapter(
                     fileContainer?.visibility = View.VISIBLE
                     fileIcon?.visibility = View.VISIBLE
                     playIcon?.visibility = View.VISIBLE
-                    
+
                     // 加载视频缩略图
                     val videoUrl = message.fileUrl?.let { fileUrl ->
                         if (fileUrl.startsWith("http")) fileUrl else "$baseUrl$fileUrl"
@@ -452,7 +452,7 @@ class MessageAdapter(
                     fileContainer?.visibility = View.VISIBLE
                     fileIcon?.visibility = View.VISIBLE
                     playIcon?.visibility = View.GONE
-                    
+
                     when {
                         isPdfFile(extension) -> {
                             messageText.text = "📄 ${message.content}"
