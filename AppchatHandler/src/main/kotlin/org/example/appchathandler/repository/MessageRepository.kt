@@ -94,11 +94,10 @@ interface MessageRepository : JpaRepository<Message, Long> {
 
     @Query("""
         SELECT m FROM Message m 
-        WHERE :userId NOT IN (SELECT du FROM m.deletedForUsers du)
-        AND (
-            (m.sender.id = :userId AND m.receiver.id = :otherId)
-            OR (m.sender.id = :otherId AND m.receiver.id = :userId)
-        )
+        WHERE m.group IS NULL
+        AND ((m.sender.id = :userId AND m.receiver.id = :otherId) 
+        OR (m.sender.id = :otherId AND m.receiver.id = :userId))
+        AND :userId NOT MEMBER OF m.deletedForUsers
         ORDER BY m.timestamp ASC
     """)
     fun findMessagesBetweenUsers(
@@ -109,8 +108,8 @@ interface MessageRepository : JpaRepository<Message, Long> {
     @Query("""
         SELECT m FROM Message m 
         WHERE m.group.id = :groupId
-        AND :userId NOT IN (SELECT du FROM m.deletedForUsers du)
-        ORDER BY m.timestamp DESC
+        AND :userId NOT MEMBER OF m.deletedForUsers
+        ORDER BY m.timestamp ASC
     """)
     fun findGroupMessages(
         @Param("groupId") groupId: Long,
@@ -317,6 +316,7 @@ interface MessageRepository : JpaRepository<Message, Long> {
             SELECT MAX(m2.id) FROM Message m2 
             WHERE (m2.sender.id = :userId OR m2.receiver.id = :userId)
             AND m2.group IS NULL
+            AND :userId NOT MEMBER OF m2.deletedForUsers
             GROUP BY 
                 CASE 
                     WHEN m2.sender.id = :userId THEN m2.receiver.id 
@@ -332,8 +332,65 @@ interface MessageRepository : JpaRepository<Message, Long> {
         AND m.id IN (
             SELECT MAX(m2.id) FROM Message m2 
             WHERE m2.group.id IN (SELECT g2.id FROM Group g2 JOIN g2.members m2 WHERE m2.id = :userId)
+            AND :userId NOT MEMBER OF m2.deletedForUsers
             GROUP BY m2.group.id
         )
     """)
     fun findLatestGroupMessagesByUser(@Param("userId") userId: Long): List<Message>
+
+    @Query("""
+        SELECT m FROM Message m 
+        WHERE m.group.id = :groupId
+        AND :userId NOT MEMBER OF m.deletedForUsers
+        ORDER BY m.timestamp DESC
+        LIMIT 1
+    """)
+    fun findLastGroupMessage(groupId: Long, userId: Long): Message?
+
+    @Query("""
+        SELECT m FROM Message m 
+        WHERE m.group.id = :groupId
+        AND :userId NOT MEMBER OF m.deletedForUsers
+        AND m.id != (
+            SELECT m2.id FROM Message m2 
+            WHERE m2.group.id = :groupId
+            AND :userId NOT MEMBER OF m2.deletedForUsers
+            ORDER BY m2.timestamp DESC
+            LIMIT 1
+        )
+        ORDER BY m.timestamp DESC
+        LIMIT 1
+    """)
+    fun findSecondLastGroupMessage(groupId: Long, userId: Long): Message?
+
+    @Query("""
+        SELECT m FROM Message m 
+        WHERE m.group IS NULL
+        AND ((m.sender.id = :userId AND m.receiver.id = :otherId)
+        OR (m.sender.id = :otherId AND m.receiver.id = :userId))
+        AND :userId NOT MEMBER OF m.deletedForUsers
+        ORDER BY m.timestamp DESC
+        LIMIT 1
+    """)
+    fun findLastPrivateMessage(userId: Long, senderId: Long, receiverId: Long): Message?
+
+    @Query("""
+        SELECT m FROM Message m 
+        WHERE m.group IS NULL
+        AND ((m.sender.id = :userId AND m.receiver.id = :otherId)
+        OR (m.sender.id = :otherId AND m.receiver.id = :userId))
+        AND :userId NOT MEMBER OF m.deletedForUsers
+        AND m.id != (
+            SELECT m2.id FROM Message m2 
+            WHERE m2.group IS NULL
+            AND ((m2.sender.id = :userId AND m2.receiver.id = :otherId)
+            OR (m2.sender.id = :otherId AND m2.receiver.id = :userId))
+            AND :userId NOT MEMBER OF m2.deletedForUsers
+            ORDER BY m2.timestamp DESC
+            LIMIT 1
+        )
+        ORDER BY m.timestamp DESC
+        LIMIT 1
+    """)
+    fun findSecondLastPrivateMessage(userId: Long, senderId: Long, receiverId: Long): Message?
 }

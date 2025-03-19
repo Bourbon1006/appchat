@@ -5,6 +5,7 @@ import android.content.ContentResolver
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -37,6 +38,9 @@ import java.time.LocalDateTime
 import retrofit2.Callback
 import retrofit2.Response
 import retrofit2.Call
+import org.greenrobot.eventbus.EventBus
+import com.example.appchat.util.UserManager
+import com.example.appchat.api.RetrofitClient
 
 class ChatActivity : AppCompatActivity() {
     private lateinit var messagesList: RecyclerView
@@ -165,7 +169,10 @@ class ChatActivity : AppCompatActivity() {
                 val messages = when (currentChatType) {
                     "GROUP" -> {
                         println("📥 Loading group messages for group: $currentGroupId")
-                        val groupMessages = ApiClient.apiService.getGroupMessages(currentGroupId)
+                        val groupMessages = ApiClient.apiService.getGroupMessages(
+                            groupId = currentGroupId,
+                            userId = UserPreferences.getUserId(this@ChatActivity)  // 添加 userId 参数
+                        )
                         groupMessages.map { message ->
                             message.copy(
                                 groupId = currentGroupId,
@@ -179,8 +186,8 @@ class ChatActivity : AppCompatActivity() {
                         println("📥 Loading private messages with user: $currentReceiverId")
                         val currentUserId = UserPreferences.getUserId(this@ChatActivity)
                         val privateMessages = ApiClient.apiService.getPrivateMessages(
-                            currentUserId, 
-                            currentReceiverId
+                            userId = currentUserId,
+                            otherId = currentReceiverId
                         )
                         privateMessages.map { message ->
                             message.copy(
@@ -207,8 +214,9 @@ class ChatActivity : AppCompatActivity() {
     private fun setupWebSocket() {
         // 设置当前聊天的用户ID
         WebSocketManager.setCurrentChat(
-            UserPreferences.getUserId(this),
-            if (currentChatType == "GROUP") currentGroupId else currentReceiverId
+            userId = UserPreferences.getUserId(this),
+            partnerId = if (currentChatType == "GROUP") currentGroupId else currentReceiverId,
+            isGroup = currentChatType == "GROUP"
         )
 
         WebSocketManager.addMessageListener { message ->
@@ -302,31 +310,32 @@ class ChatActivity : AppCompatActivity() {
     private fun deleteMessage(messageId: Long) {
         lifecycleScope.launch {
             try {
-                println("🗑️ Starting message deletion process: $messageId")
+                // 先从本地缓存中移除
+                adapter.removeMessageCompletely(messageId)
                 
-                // 先从本地删除
-                adapter.removeMessage(messageId)
-                println("✅ Local message deletion completed")
-                
-                // 然后从服务器删除
-                val response = ApiClient.apiService.deleteMessage(
-                    messageId,
-                    UserPreferences.getUserId(this@ChatActivity)
-                )
-                if (response.isSuccessful) {
-                    response.body()?.let { deleteResponse ->
-                        if (deleteResponse.isFullyDeleted) {
-                            adapter.removeMessageCompletely(messageId)
-                        }
+                // 然后同步到服务器
+                ApiClient.apiService.deleteMessage(
+                    messageId = messageId,
+                    userId = UserPreferences.getUserId(this@ChatActivity)
+                ).let { response ->
+                    if (response.isSuccessful) {
+                        Toast.makeText(this@ChatActivity, "消息已删除", Toast.LENGTH_SHORT).show()
+                    } else {
+                        // 如果服务器删除失败，恢复本地缓存
+                        loadMessages(
+                            if (currentChatType == "GROUP") currentGroupId else currentReceiverId,
+                            currentChatType
+                        )
+                        Toast.makeText(this@ChatActivity, "删除失败", Toast.LENGTH_SHORT).show()
                     }
-                    println("✅ Server message deletion successful")
-                    Toast.makeText(this@ChatActivity, "消息已删除", Toast.LENGTH_SHORT).show()
-                } else {
-                    println("⚠️ Server deletion failed but local deletion succeeded: ${response.code()}")
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
-                println("❌ Error in deletion process: ${e.message}")
+                // 发生错误时恢复本地缓存
+                loadMessages(
+                    if (currentChatType == "GROUP") currentGroupId else currentReceiverId,
+                    currentChatType
+                )
+                Toast.makeText(this@ChatActivity, "删除失败", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -452,7 +461,11 @@ class ChatActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         WebSocketManager.removeMessageListeners()
-        WebSocketManager.setCurrentChat(UserPreferences.getUserId(this), 0)
+        WebSocketManager.setCurrentChat(
+            userId = UserPreferences.getUserId(this),
+            partnerId = 0,
+            isGroup = false
+        )
     }
 
     private fun showImagePreview(fileUrl: String?) {
@@ -565,7 +578,7 @@ class ChatActivity : AppCompatActivity() {
                 ApiClient.apiService.markSessionAsRead(
                     userId = UserPreferences.getUserId(this@ChatActivity),
                     partnerId = partnerId,
-                    type = currentChatType.uppercase()
+                    type = currentChatType
                 ).let { response ->
                     if (!response.isSuccessful) {
                         println("⚠️ Failed to mark session as read: ${response.code()}")
@@ -651,15 +664,23 @@ class ChatActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 val messages = when (type) {
-                    "GROUP" -> ApiClient.apiService.getGroupMessages(partnerId)
+                    "GROUP" -> {
+                        println("📥 Loading group messages for group: $partnerId")
+                        ApiClient.apiService.getGroupMessages(
+                            groupId = partnerId,
+                            userId = UserPreferences.getUserId(this@ChatActivity)  // 添加 userId 参数
+                        )
+                    }
                     else -> ApiClient.apiService.getPrivateMessages(
-                        UserPreferences.getUserId(this@ChatActivity),
-                        partnerId
+                        userId = UserPreferences.getUserId(this@ChatActivity),
+                        otherId = partnerId
                     )
                 }
                 adapter.setMessages(messages)
                 messagesList.scrollToPosition(adapter.itemCount - 1)
             } catch (e: Exception) {
+                e.printStackTrace()
+                println("❌ Error loading chat history: ${e.message}")
                 Toast.makeText(this@ChatActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
             }
         }
@@ -668,16 +689,12 @@ class ChatActivity : AppCompatActivity() {
     private fun markMessagesAsRead(partnerId: Long, type: String) {
         lifecycleScope.launch {
             try {
-                when (type) {
-                    "GROUP" -> ApiClient.apiService.markGroupMessagesAsRead(
-                        UserPreferences.getUserId(this@ChatActivity),
-                        partnerId
-                    )
-                    else -> ApiClient.apiService.markPrivateMessagesAsRead(
-                        UserPreferences.getUserId(this@ChatActivity),
-                        partnerId
-                    )
-                }
+                // 使用统一的端点
+                ApiClient.apiService.markSessionAsRead(
+                    userId = UserPreferences.getUserId(this@ChatActivity),
+                    partnerId = partnerId,
+                    type = type
+                )
             } catch (e: Exception) {
                 println("❌ Error marking messages as read: ${e.message}")
             }
@@ -766,4 +783,31 @@ class ChatActivity : AppCompatActivity() {
         Toast.makeText(this, "无法获取聊天信息", Toast.LENGTH_SHORT).show()
         finish()
     }
+
+    override fun onPause() {
+        super.onPause()
+        // 退出聊天界面时更新会话列表
+        updateMessageSessions()
+    }
+
+    private fun updateMessageSessions() {
+        val userId = UserManager.getCurrentUser()?.id ?: return
+        
+        lifecycleScope.launch {
+            try {
+                val response = RetrofitClient.messageService.getMessageSessions(userId)
+                if (response.isSuccessful) {
+                    // 会话列表已更新，通知 MainActivity 刷新
+                    EventBus.getDefault().post(SessionUpdateEvent())
+                } else {
+                    Log.e("ChatActivity", "Failed to update sessions: ${response.code()}")
+                }
+            } catch (e: Exception) {
+                Log.e("ChatActivity", "Error updating sessions", e)
+            }
+        }
+    }
+
+    // 添加 SessionUpdateEvent 类
+    class SessionUpdateEvent
 }

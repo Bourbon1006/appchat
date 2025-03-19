@@ -13,19 +13,8 @@ data class MessageDTO(
     val receiverId: Long?,
     val receiverName: String?,
     val groupId: Long?,
-    val type: MessageType = MessageType.TEXT,
+    val type: MessageType,
     val fileUrl: String?
 )
 
-fun Message.toDTO() = MessageDTO(
-    id = id,
-    content = content,
-    timestamp = timestamp,
-    senderId = sender.id,
-    senderName = sender.username,
-    receiverId = receiver?.id,
-    receiverName = receiver?.username,
-    groupId = group?.id,
-    type = type ?: MessageType.TEXT,
-    fileUrl = fileUrl
-) 
+// 如果这里也定义了 toDTO 扩展函数，需要删除它 

@@ -66,7 +66,8 @@ interface ApiService {
 
     @GET("api/messages/group/{groupId}")
     suspend fun getGroupMessages(
-        @Path("groupId") groupId: Long
+        @Path("groupId") groupId: Long,
+        @Query("userId") userId: Long
     ): List<ChatMessage>
 
     @GET("api/messages/private")
@@ -136,12 +137,12 @@ interface ApiService {
         @Query("userId") userId: Long
     ): List<MessageSession>
 
-    @POST("api/messages/read")
+    @POST("/api/messages/read")
     suspend fun markSessionAsRead(
         @Query("userId") userId: Long,
         @Query("partnerId") partnerId: Long,
         @Query("type") type: String
-    ): Response<Unit>
+    ): Response<Void>
 
     @DELETE("api/messages/sessions")
     suspend fun deleteSession(
@@ -159,18 +160,6 @@ interface ApiService {
     suspend fun deleteFriend(
         @Query("userId") userId: Long,
         @Query("friendId") friendId: Long
-    ): Response<Unit>
-
-    @POST("/api/messages/group/{groupId}/read")
-    suspend fun markGroupMessagesAsRead(
-        @Path("groupId") groupId: Long,
-        @Query("userId") userId: Long
-    ): Response<Unit>
-
-    @POST("api/messages/private/read")
-    suspend fun markPrivateMessagesAsRead(
-        @Query("userId") userId: Long,
-        @Query("partnerId") partnerId: Long
     ): Response<Unit>
 
     @DELETE("api/sessions/private")

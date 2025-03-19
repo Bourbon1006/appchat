@@ -181,8 +181,8 @@ class WebSocketManager {
             messageListeners.forEach { it(message) }
         }
 
-        fun setCurrentChat(userId: Long, partnerId: Long) {
-            println("🔄 Setting current chat: userId=$userId, partnerId=$partnerId (previous partnerId=$currentChatPartnerId)")
+        fun setCurrentChat(userId: Long, partnerId: Long, isGroup: Boolean = false) {
+            println("🔄 Setting current chat: userId=$userId, partnerId=$partnerId, isGroup=$isGroup (previous partnerId=$currentChatPartnerId)")
             currentChatPartnerId = partnerId
 
             // 只有当 partnerId 不为 0 时才标记为已读
@@ -193,7 +193,7 @@ class WebSocketManager {
                         val response = ApiClient.apiService.markSessionAsRead(
                             userId = userId,
                             partnerId = partnerId,
-                            type = "PRIVATE"  // 如果是群聊，这里需要判断
+                            type = if (isGroup) "GROUP" else "PRIVATE"
                         )
                         println("✅ markSessionAsRead API response when entering chat: $response")
                         

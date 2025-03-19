@@ -15,20 +15,18 @@ import org.example.appchathandler.dto.MessageSessionInfo
 import org.example.appchathandler.entity.*
 import org.example.appchathandler.repository.GroupRepository
 import org.springframework.beans.factory.annotation.Autowired
-import org.example.appchathandler.service.EventService
-import org.example.appchathandler.websocket.ChatWebSocketHandler
-import org.springframework.context.annotation.Lazy
+import org.springframework.context.ApplicationEventPublisher
+import org.example.appchathandler.event.SessionsUpdateEvent
 
 @Service
 class MessageService(
     private val messageRepository: MessageRepository,
-    private val eventService: EventService,
     private val userService: UserService,
     private val groupService: GroupService,
+    private val applicationEventPublisher: ApplicationEventPublisher,
     private val messageReadStatusRepository: MessageReadStatusRepository,
     private val userRepository: UserRepository,
-    private val groupRepository: GroupRepository,
-    @Lazy private val webSocketHandler: ChatWebSocketHandler
+    private val groupRepository: GroupRepository
 ) {
     fun createMessage(
         content: String,
@@ -64,37 +62,32 @@ class MessageService(
         return messageRepository.save(message)
     }
 
-    fun getGroupMessages(groupId: Long): List<Message> {
-        val groupDto = groupService.getGroup(groupId)
-        val group = Group(
-            id = groupDto.id,
-            name = groupDto.name,
-            creator = userService.getUser(groupDto.creator.id)
-        )
-        return messageRepository.findByGroupOrderByTimestampAsc(group)
+    fun getGroupMessages(groupId: Long, userId: Long): List<MessageDTO> {
+        return messageRepository.findGroupMessages(groupId, userId)
+            .map { message ->
+                MessageDTO(
+                    id = message.id,
+                    content = message.content,
+                    timestamp = message.timestamp,
+                    senderId = message.sender.id,
+                    senderName = message.sender.username,
+                    receiverId = null,
+                    receiverName = null,
+                    groupId = message.group?.id,
+                    type = message.type,
+                    fileUrl = message.fileUrl
+                )
+            }
     }
 
     fun getPrivateMessages(userId: Long, otherId: Long): List<MessageDTO> {
         try {
-            val user = userService.getUser(userId)
-            val otherUser = userService.getUser(otherId)
-            
-            return messageRepository.findMessagesBetweenUsers(userId, otherId)
-                .map { message -> 
-                    MessageDTO(
-                        id = message.id,
-                        content = message.content,
-                        timestamp = message.timestamp,
-                        senderId = message.sender.id,
-                        senderName = message.sender.username,
-                        receiverId = message.receiver?.id ?: 0L,
-                        receiverName = message.receiver?.username,
-                        groupId = message.group?.id,
-                        type = message.type,
-                        fileUrl = message.fileUrl
-                    )
-                }
+            println("📨 Getting private messages between users $userId and $otherId")
+            val messages = messageRepository.findMessagesBetweenUsers(userId, otherId)
+            println("✅ Found ${messages.size} messages")
+            return messages.map { it.toDTO() }
         } catch (e: Exception) {
+            println("❌ Error getting private messages: ${e.message}")
             e.printStackTrace()
             throw e
         }
@@ -209,32 +202,66 @@ class MessageService(
             val message = messageRepository.findById(messageId).orElse(null) 
                 ?: return false
 
-            // For group messages, mark as deleted for this user
-            if (message.group != null) {
-                val deletedUsers = HashSet(message.deletedForUsers)
-                deletedUsers.add(userId)
-                message.deletedForUsers = deletedUsers
-                messageRepository.save(message)
-                return true
-            }
-
-            // For private messages
+            // 将当前消息标记为该用户已删除
             val deletedUsers = HashSet(message.deletedForUsers)
             deletedUsers.add(userId)
             message.deletedForUsers = deletedUsers
             messageRepository.save(message)
 
-            // Check if all relevant users have deleted the message
-            val allRelevantUsers = setOfNotNull(
-                message.sender.id,
-                message.receiver?.id
-            )
+            // 如果删除的是最后一条消息，更新会话的最后一条消息
+            updateLastMessageIfNeeded(message, userId)
 
-            allRelevantUsers.all { deletedUsers.contains(it) }
+            false
         } catch (e: Exception) {
             println("❌ Error marking message as deleted: ${e.message}")
             e.printStackTrace()
             false
+        }
+    }
+
+    private fun updateLastMessageIfNeeded(deletedMessage: Message, userId: Long) {
+        try {
+            // 获取会话的最后一条消息
+            val lastMessage = if (deletedMessage.group != null) {
+                // 群聊消息
+                messageRepository.findLastGroupMessage(
+                    deletedMessage.group!!.id,
+                    userId
+                )
+            } else {
+                // 私聊消息
+                messageRepository.findLastPrivateMessage(
+                    userId,
+                    deletedMessage.sender.id,
+                    deletedMessage.receiver?.id ?: 0L
+                )
+            }
+
+            // 如果删除的是最后一条消息，更新会话状态
+            if (lastMessage != null && lastMessage.id == deletedMessage.id) {
+                // 获取倒数第二条消息作为新的最后一条消息
+                val newLastMessage = if (deletedMessage.group != null) {
+                    messageRepository.findSecondLastGroupMessage(
+                        deletedMessage.group!!.id,
+                        userId
+                    )
+                } else {
+                    messageRepository.findSecondLastPrivateMessage(
+                        userId,
+                        deletedMessage.sender.id,
+                        deletedMessage.receiver?.id ?: 0L
+                    )
+                }
+                
+                // 更新会话的最后一条消息
+                if (newLastMessage != null) {
+                    // 触发会话更新事件
+                    notifySessionUpdate(userId)
+                }
+            }
+        } catch (e: Exception) {
+            println("❌ Error updating last message: ${e.message}")
+            e.printStackTrace()
         }
     }
 
@@ -335,46 +362,75 @@ class MessageService(
     }
 
     fun getMessageSessions(userId: Long): List<MessageSessionDTO> {
-        val privateMessages = messageRepository.findLatestPrivateMessagesByUser(userId)
-        val groupMessages = messageRepository.findLatestGroupMessagesByUser(userId)
-        val sessions = mutableListOf<MessageSessionDTO>()
-        
-        // Handle private chat sessions
-        privateMessages.forEach { message ->
-            val partnerId = if (message.sender.id == userId) message.receiver?.id else message.sender.id
-            val partner = userRepository.findById(partnerId ?: 0).orElse(null)
+        try {
+            println("⭐ Getting message sessions for user $userId")
             
-            partner?.let { user ->
-                sessions.add(MessageSessionDTO(
-                    id = message.id,
-                    partnerId = partnerId ?: 0,
-                    partnerName = user.username,
-                    lastMessage = message.content,
-                    lastMessageTime = message.timestamp,
-                    unreadCount = messageReadStatusRepository.countUnreadMessages(userId, partnerId ?: 0),
-                    type = MessageSessionInfo.Type.PRIVATE,
-                    partnerAvatar = user.avatarUrl
-                ))
+            val privateMessages = messageRepository.findLatestPrivateMessagesByUser(userId)
+            println("📬 Found ${privateMessages.size} private messages")
+            
+            val groupMessages = messageRepository.findLatestGroupMessagesByUser(userId)
+            println("👥 Found ${groupMessages.size} group messages")
+            
+            val sessions = mutableListOf<MessageSessionDTO>()
+
+            // Handle private chat sessions
+            privateMessages.forEach { message ->
+                try {
+                    val partnerId = if (message.sender.id == userId) message.receiver?.id else message.sender.id
+                    val partner = if (message.sender.id == userId) message.receiver else message.sender
+                    
+                    partner?.let { user ->
+                        val unreadCount = messageReadStatusRepository.countUnreadMessages(userId, partnerId ?: 0)
+                        sessions.add(MessageSessionDTO(
+                            id = message.id,
+                            partnerId = user.id,
+                            partnerName = user.username,
+                            lastMessage = message.content,
+                            lastMessageTime = message.timestamp,
+                            unreadCount = unreadCount,
+                            type = MessageSessionInfo.Type.PRIVATE,
+                            partnerAvatar = user.avatarUrl
+                        ))
+                        println("✅ Added private session with ${user.username}")
+                    }
+                } catch (e: Exception) {
+                    println("❌ Error processing private message ${message.id}: ${e.message}")
+                    e.printStackTrace()
+                }
             }
-        }
-        
-        // Handle group chat sessions
-        groupMessages.forEach { message ->
-            message.group?.let { group ->
-                sessions.add(MessageSessionDTO(
-                    id = message.id,
-                    partnerId = group.id,
-                    partnerName = group.name,
-                    lastMessage = message.content,
-                    lastMessageTime = message.timestamp,
-                    unreadCount = messageReadStatusRepository.countUnreadMessages(userId, group.id),
-                    type = MessageSessionInfo.Type.GROUP,
-                    partnerAvatar = group.avatarUrl
-                ))
+
+            // Handle group chat sessions
+            groupMessages.forEach { message ->
+                try {
+                    message.group?.let { group ->
+                        val unreadCount = messageReadStatusRepository.countUnreadMessages(userId, group.id)
+                        sessions.add(MessageSessionDTO(
+                            id = message.id,
+                            partnerId = group.id,
+                            partnerName = group.name,
+                            lastMessage = message.content,
+                            lastMessageTime = message.timestamp,
+                            unreadCount = unreadCount,
+                            type = MessageSessionInfo.Type.GROUP,
+                            partnerAvatar = group.avatarUrl
+                        ))
+                        println("✅ Added group session for ${group.name}")
+                    }
+                } catch (e: Exception) {
+                    println("❌ Error processing group message ${message.id}: ${e.message}")
+                    e.printStackTrace()
+                }
             }
+
+            val sortedSessions = sessions.sortedByDescending { it.lastMessageTime }
+            println("📊 Returning ${sortedSessions.size} total sessions")
+            return sortedSessions
+            
+        } catch (e: Exception) {
+            println("❌ Error getting message sessions: ${e.message}")
+            e.printStackTrace()
+            throw e
         }
-        
-        return sessions.sortedByDescending { it.lastMessageTime }
     }
 
     fun canUserDeleteMessage(userId: Long, message: Message): Boolean {
@@ -400,5 +456,10 @@ class MessageService(
             e.printStackTrace()
             false
         }
+    }
+
+    private fun notifySessionUpdate(userId: Long) {
+        val sessions = getMessageSessions(userId)
+        applicationEventPublisher.publishEvent(SessionsUpdateEvent(userId, sessions))
     }
 }

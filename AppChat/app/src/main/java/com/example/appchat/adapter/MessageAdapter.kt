@@ -25,6 +25,11 @@ import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.request.RequestOptions
+import com.bumptech.glide.load.DataSource
+import com.bumptech.glide.load.engine.GlideException
+import com.bumptech.glide.request.RequestListener
+import com.bumptech.glide.request.target.Target
+import android.graphics.drawable.Drawable
 import com.example.appchat.ImagePreviewActivity
 import com.example.appchat.MainActivity
 import com.example.appchat.R
@@ -43,6 +48,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.media.MediaScannerConnection
 import com.example.appchat.api.ApiClient
+import com.example.appchat.util.UserPreferences
 
 class MessageAdapter(
     private val context: Context,
@@ -98,15 +104,7 @@ class MessageAdapter(
     }
 
     fun addMessage(message: ChatMessage) {
-        // 确保消息的聊天类型正确
-        val updatedMessage = message.copy(
-            chatType = currentChatType,
-            receiverId = when (currentChatType) {
-                "GROUP" -> null
-                else -> if (message.senderId == currentUserId) chatPartnerId else currentUserId
-            }
-        )
-        messages.add(updatedMessage)
+        messages.add(message)
         notifyItemInserted(messages.size - 1)
     }
 
@@ -138,15 +136,12 @@ class MessageAdapter(
     }
 
     fun removeMessage(messageId: Long) {
-        val iterator = messages.iterator()
-        while (iterator.hasNext()) {
-            val message = iterator.next()
-            if (message.id == messageId) {
-                iterator.remove()
-                break
-            }
+        val position = messages.indexOfFirst { it.id == messageId }
+        if (position != -1) {
+            messages.removeAt(position)
+            notifyItemRemoved(position)
+            selectedMessages.remove(messageId)
         }
-        notifyDataSetChanged() // 确保 UI 更新
     }
 
     fun loadLocalMessages(): List<ChatMessage> {
@@ -164,15 +159,7 @@ class MessageAdapter(
 
     fun setMessages(newMessages: List<ChatMessage>) {
         messages.clear()
-        messages.addAll(newMessages.map { message ->
-            message.copy(
-                chatType = currentChatType,  // 确保使用正确的聊天类型
-                receiverId = when (currentChatType) {
-                    "GROUP" -> null
-                    else -> if (message.senderId == currentUserId) chatPartnerId else currentUserId
-                }
-            )
-        })
+        messages.addAll(newMessages)
         notifyDataSetChanged()
     }
 
@@ -221,6 +208,8 @@ class MessageAdapter(
     fun getMessage(messageId: Long): ChatMessage? {
         return messages.find { it.id == messageId }
     }
+
+    fun getMessages(): List<ChatMessage> = messages.toList()
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MessageViewHolder {
         val layout = when (viewType) {
@@ -279,18 +268,45 @@ class MessageAdapter(
             }.trimEnd('/')
 
             // 加载头像
-            val avatarUrl = "$baseUrl/api/users/${message.senderId}/avatar"
-            println("⭐ Loading avatar from URL: $avatarUrl")
-
-            if (!itemView.context.isDestroyed()) {
-                Glide.with(itemView.context)
-                    .load(avatarUrl)
-                    .placeholder(R.drawable.loading_placeholder)
-                    .error(R.drawable.error_placeholder)
-                    .diskCacheStrategy(DiskCacheStrategy.ALL)
-                    .circleCrop()
-                    .into(avatarImage)
+            val avatarUrl = if (message.senderId == currentUserId) {
+                UserPreferences.getAvatarUrl(context)  // 修改为你的获取头像URL的方法
+            } else {
+                // 构建其他用户的头像URL
+                "$baseUrl/api/users/${message.senderId}/avatar"
             }
+
+            // 始终设置用户名，不管头像是否加载
+            senderName.text = message.senderName
+            senderName.visibility = View.VISIBLE
+
+            Glide.with(context)
+                .load(avatarUrl)
+                .apply(RequestOptions.circleCropTransform())
+                .placeholder(R.drawable.default_avatar)
+                .error(R.drawable.default_avatar)
+                .listener(object : RequestListener<Drawable> {
+                    override fun onLoadFailed(
+                        e: GlideException?,
+                        p1: Any?,
+                        target: Target<Drawable>,
+                        isFirstResource: Boolean
+                    ): Boolean {
+                        senderName.visibility = View.VISIBLE
+                        return false
+                    }
+
+                    override fun onResourceReady(
+                        resource: Drawable,
+                        model: Any,
+                        target: Target<Drawable>,
+                        dataSource: DataSource,
+                        isFirstResource: Boolean
+                    ): Boolean {
+                        senderName.visibility = View.VISIBLE
+                        return false
+                    }
+                })
+                .into(avatarImage)
 
             // 处理消息内容
             when (message.type) {

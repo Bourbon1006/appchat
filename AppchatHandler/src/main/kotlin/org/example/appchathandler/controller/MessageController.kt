@@ -27,30 +27,28 @@ class MessageController(
     @GetMapping("/group/{groupId}")
     fun getGroupMessages(
         @PathVariable groupId: Long,
-        @RequestParam(required = false) startTime: LocalDateTime?,
-        @RequestParam(required = false) endTime: LocalDateTime?
+        @RequestParam userId: Long
     ): ResponseEntity<List<MessageDTO>> {
         return try {
-            val messages = if (startTime != null && endTime != null) {
-                messageService.getGroupMessagesByDateRange(groupId, startTime, endTime)
-            } else {
-                messageService.getGroupMessages(groupId)
-            }
-            ResponseEntity.ok(messages.map { it.toDTO() })
+            val messages = messageService.getGroupMessages(groupId, userId)
+            ResponseEntity.ok(messages)
         } catch (e: Exception) {
-            ResponseEntity.badRequest().build()
+            e.printStackTrace()
+            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
         }
     }
 
     @GetMapping("/private")
     fun getPrivateMessages(
-        @RequestParam("userId") userId: Long,
-        @RequestParam("otherId") otherId: Long
+        @RequestParam userId: Long,
+        @RequestParam otherId: Long
     ): ResponseEntity<List<MessageDTO>> {
         return try {
             val messages = messageService.getPrivateMessages(userId, otherId)
+            println("✅ Found ${messages.size} private messages between users $userId and $otherId")
             ResponseEntity.ok(messages)
         } catch (e: Exception) {
+            println("❌ Error getting private messages: ${e.message}")
             e.printStackTrace()
             ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
         }
@@ -215,49 +213,16 @@ class MessageController(
     }
 
     @GetMapping("/sessions")
-    fun getMessageSessions(@RequestParam userId: Long): ResponseEntity<List<MessageSessionInfo>> {
+    fun getMessageSessions(@RequestParam userId: Long): ResponseEntity<List<MessageSessionDTO>> {
         return try {
             val sessions = messageService.getMessageSessions(userId)
             ResponseEntity.ok(sessions)
         } catch (e: Exception) {
-            e.printStackTrace() // 打印错误堆栈以便调试
-            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
-        }
-    }
-
-    @PostMapping("/private/read")
-    fun markPrivateMessagesAsRead(
-        @RequestParam userId: Long,
-        @RequestParam partnerId: Long
-    ): ResponseEntity<Void> {
-        return try {
-            println("📬 Marking private messages as read: userId=$userId, partnerId=$partnerId")
-            messageService.markPrivateMessagesAsRead(userId, partnerId)
-            println("✅ Successfully marked private messages as read")
-            ResponseEntity.ok().build()
-        } catch (e: Exception) {
-            println("❌ Error marking messages as read: ${e.message}")
             e.printStackTrace()
             ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
         }
     }
 
-    @PostMapping("/group/read")
-    fun markGroupMessagesAsRead(
-        @RequestParam userId: Long,
-        @RequestParam groupId: Long
-    ): ResponseEntity<Void> {
-        return try {
-            println("📬 Marking group messages as read: userId=$userId, groupId=$groupId")
-            messageService.markGroupMessagesAsRead(userId, groupId)
-            println("✅ Successfully marked group messages as read")
-            ResponseEntity.ok().build()
-        } catch (e: Exception) {
-            println("❌ Error marking messages as read: ${e.message}")
-            e.printStackTrace()
-            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
-        }
-    }
     @PostMapping("/read")
     fun markSessionAsRead(
         @RequestParam userId: Long,

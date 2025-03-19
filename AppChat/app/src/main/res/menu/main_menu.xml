@@ -49,11 +49,11 @@
                 android:title="创建群聊"
                 app:showAsAction="never" />
 
-<!--            <item
-                android:id="@+id/menu_contacts"
-                android:icon="@drawable/ic_contacts"
-                android:title="联系人"
-                app:showAsAction="never" />-->
+            <item
+                android:id="@+id/action_nearby_transfer"
+                android:icon="@drawable/ic_nearby_transfer"
+                android:title="面对面快传"
+                app:showAsAction="never" />
 
             <item
                 android:id="@+id/action_logout"

@@ -81,6 +81,11 @@ import androidx.fragment.app.Fragment
 import org.json.JSONObject
 import com.example.appchat.databinding.DialogContactsBinding
 import com.example.appchat.model.Contact
+import org.greenrobot.eventbus.EventBus
+import org.greenrobot.eventbus.Subscribe
+import org.greenrobot.eventbus.ThreadMode
+import com.example.appchat.api.RetrofitClient
+import android.util.Log
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webSocket: WebSocket
@@ -316,6 +321,9 @@ class MainActivity : AppCompatActivity() {
 
         // 默认显示消息页面
         bottomNavigation.selectedItemId = R.id.message_display
+
+        // 注册 EventBus
+        EventBus.getDefault().register(this)
     }
 
     private fun setupViews() {
@@ -891,7 +899,10 @@ class MainActivity : AppCompatActivity() {
                 val messages = when (type) {
                     "GROUP" -> {
                         println("📥 Loading group messages for group: $partnerId")
-                        ApiClient.apiService.getGroupMessages(groupId = partnerId)
+                        ApiClient.apiService.getGroupMessages(
+                            groupId = partnerId,
+                            userId = UserPreferences.getUserId(this@MainActivity)
+                        )
                     }
                     else -> {
                         println("📥 Loading private messages with user: $partnerId")
@@ -930,7 +941,10 @@ class MainActivity : AppCompatActivity() {
     private fun loadGroupMessages(groupId: Long) {
         lifecycleScope.launch {
             try {
-                val messages = ApiClient.apiService.getGroupMessages(groupId)
+                val messages = ApiClient.apiService.getGroupMessages(
+                    groupId = groupId,
+                    userId = UserPreferences.getUserId(this@MainActivity)
+                )
                 messageAdapter.setMessages(messages)
                 messageList.scrollToPosition(messageAdapter.itemCount - 1)
             } catch (e: Exception) {
@@ -946,6 +960,8 @@ class MainActivity : AppCompatActivity() {
         webSocket.close(1000, "Activity destroyed")
         // 移除好友请求监听器
         WebSocketManager.removeFriendRequestListeners()
+        // 取消注册 EventBus
+        EventBus.getDefault().unregister(this)
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -996,6 +1012,10 @@ class MainActivity : AppCompatActivity() {
             }
             R.id.action_logout -> {
                 showLogoutConfirmDialog()
+                true
+            }
+            R.id.action_nearby_transfer -> {
+                startActivity(Intent(this, NearbyTransferActivity::class.java))
                 true
             }
             else -> super.onOptionsItemSelected(item)
@@ -1579,6 +1599,34 @@ class MainActivity : AppCompatActivity() {
         supportFragmentManager.beginTransaction()
             .replace(R.id.fragmentContainer, fragment)
             .commit()
+    }
+
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    fun onSessionUpdate(event: ChatActivity.SessionUpdateEvent) {
+        // 收到会话更新事件，刷新会话列表
+        loadMessageSessions()
+    }
+
+    private fun loadMessageSessions() {
+        val userId = UserPreferences.getUserId(this)
+        lifecycleScope.launch {
+            try {
+                val response = RetrofitClient.messageService.getMessageSessions(userId)
+                if (response.isSuccessful) {
+                    response.body()?.let { sessions ->
+                        // 更新 MessageDisplayFragment 的会话列表
+                        val fragment = supportFragmentManager.findFragmentById(R.id.fragmentContainer)
+                        if (fragment is MessageDisplayFragment) {
+                            // 转换 DTO 到 MessageSession
+                            val messageSessions = sessions.map { it.toMessageSession() }
+                            fragment.updateSessions(messageSessions)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Error loading sessions", e)
+            }
+        }
     }
 
     companion object {

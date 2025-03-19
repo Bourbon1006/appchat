@@ -1,6 +1,7 @@
 package com.example.appchat.util
 
 import android.content.Context
+import com.example.appchat.R
 
 object UserPreferences {
     private const val PREF_NAME = "AppChatPrefs"
@@ -37,5 +38,16 @@ object UserPreferences {
             .edit()
             .clear()
             .apply()
+    }
+
+    fun getAvatarUrl(context: Context): String {
+        val baseUrl = with(context) {
+            val ip = getString(R.string.server_ip)
+            val port = getString(R.string.server_port)
+            getString(R.string.server_url_format).format(ip, port)
+        }.trimEnd('/')
+        
+        val userId = getUserId(context)
+        return "$baseUrl/api/users/$userId/avatar"
     }
 } 
