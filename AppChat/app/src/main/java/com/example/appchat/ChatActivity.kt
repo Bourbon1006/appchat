@@ -14,6 +14,7 @@ import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.addCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -30,10 +31,12 @@ import com.example.appchat.model.MessageType
 import com.example.appchat.util.UserPreferences
 import com.example.appchat.websocket.WebSocketManager
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
-import java.io.InputStream
+import java.io.File
 import java.time.LocalDateTime
 import retrofit2.Callback
 import retrofit2.Response
@@ -76,6 +79,7 @@ class ChatActivity : AppCompatActivity() {
         setupSendButton()
         setupAttachButton()
         setupToolbar()
+        setupDeleteButton()
         
         // 设置聊天
         setupChat()
@@ -83,6 +87,15 @@ class ChatActivity : AppCompatActivity() {
         // 加载历史消息并设置 WebSocket
         loadChatHistory()
         setupWebSocket()
+
+        // 注册返回键回调
+        onBackPressedDispatcher.addCallback(this) {
+            if (isMultiSelectMode) {
+                exitMultiSelectMode()
+            } else {
+                finish()
+            }
+        }
     }
 
     private fun initViews() {
@@ -97,44 +110,49 @@ class ChatActivity : AppCompatActivity() {
         messagesList.layoutManager = LinearLayoutManager(this).apply {
             stackFromEnd = true
         }
+        
         adapter = MessageAdapter(
             context = this,
             currentUserId = UserPreferences.getUserId(this),
             currentChatType = chatType,
             chatPartnerId = receiverId,
-            onMessageDelete = { messageId ->
-                if (isMultiSelectMode) {
-                    adapter.toggleMessageSelection(messageId)
-                    updateSelectedCount(adapter.getSelectedMessages().size)
+            onMessageLongClick = { position ->
+                if (!isMultiSelectMode) {
+                    enterMultiSelectMode()
+                    adapter.toggleMessageSelection(position)
+                    updateSelectionTitle()
+                    true
                 } else {
-                    // 处理消息点击事件
-                    adapter.getMessage(messageId)?.let { message ->
-                        when (message.type) {
-                            MessageType.FILE -> {
-                                val extension = message.content.substringAfterLast('.', "").lowercase()
-                                when {
-                                    isImageFile(extension) -> showImagePreview(message.fileUrl)
-                                    isVideoFile(extension) -> showVideoPreview(message.fileUrl)
-                                    else -> openFile(message.fileUrl)
-                                }
-                            }
-                            else -> {} // 对于其他类型的消息不做特殊处理
+                    false
+                }
+            },
+            onMessageClick = { position ->
+                if (isMultiSelectMode) {
+                    adapter.toggleMessageSelection(position)
+                    updateSelectionTitle()
+                }
+            },
+            onMessageDelete = { messageId ->
+                // 处理消息删除
+                lifecycleScope.launch {
+                    try {
+                        val response = ApiClient.apiService.deleteMessage(
+                            messageId = messageId,
+                            userId = UserPreferences.getUserId(this@ChatActivity)
+                        )
+                        if (response.isSuccessful) {
+                            adapter.removeMessage(messageId)
+                        } else {
+                            Toast.makeText(this@ChatActivity, "删除失败", Toast.LENGTH_SHORT).show()
                         }
+                    } catch (e: Exception) {
+                        Toast.makeText(this@ChatActivity, "网络错误", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
         )
+        
         messagesList.adapter = adapter
-
-        adapter.setOnItemLongClickListener { position ->
-            val messageId = adapter.getItemId(position)
-            if (!isMultiSelectMode) {
-                enterMultiSelectMode()
-                adapter.toggleMessageSelection(messageId)
-                updateSelectedCount(adapter.getSelectedMessages().size)
-            }
-            true
-        }
     }
 
     private fun updateSelectedCount(count: Int) {
@@ -253,58 +271,43 @@ class ChatActivity : AppCompatActivity() {
 
     private fun showDeleteButton() {
         deleteButton.visibility = View.VISIBLE
-        supportActionBar?.apply {
-            setDisplayHomeAsUpEnabled(false)
-            setDisplayShowTitleEnabled(false)
-        }
-        deleteButton.setOnClickListener {
-            val selectedMessages = adapter.getSelectedMessages()
-            if (selectedMessages.isNotEmpty()) {
-                AlertDialog.Builder(this)
-                    .setTitle("删除消息")
-                    .setMessage("确定要删除选中的 ${selectedMessages.size} 条消息吗？")
-                    .setPositiveButton("确定") { _, _ ->
-                        lifecycleScope.launch {
-                            try {
-                                selectedMessages.forEach { messageId ->
-                                    deleteMessage(messageId)
-                                }
-                                exitMultiSelectMode()
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                                Toast.makeText(this@ChatActivity, "删除失败", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    }
-                    .setNegativeButton("取消", null)
-                    .show()
-            }
-        }
+        messageInput.visibility = View.GONE
+        sendButton.visibility = View.GONE
+        attachButton.visibility = View.GONE
     }
 
     private fun hideDeleteButton() {
         deleteButton.visibility = View.GONE
-        supportActionBar?.apply {
-            setDisplayHomeAsUpEnabled(true)
-            setDisplayShowTitleEnabled(true)
-            title = when (currentChatType) {
-                "PRIVATE" -> receiverName
-                "GROUP" -> "$receiverName (群聊)"
-                else -> receiverName
-            }
-        }
     }
 
     private fun enterMultiSelectMode() {
         isMultiSelectMode = true
         adapter.enterMultiSelectMode()
         showDeleteButton()
+        supportActionBar?.title = "已选择 0 条消息"
     }
 
     private fun exitMultiSelectMode() {
         isMultiSelectMode = false
         adapter.exitMultiSelectMode()
         hideDeleteButton()
+        
+        // 恢复标题
+        supportActionBar?.title = when (currentChatType) {
+            "PRIVATE" -> receiverName
+            "GROUP" -> "$receiverName (群聊)"
+            else -> receiverName
+        }
+        
+        // 恢复正常的输入界面
+        messageInput.visibility = View.VISIBLE
+        sendButton.visibility = View.VISIBLE
+        attachButton.visibility = View.VISIBLE
+    }
+
+    private fun updateSelectionTitle() {
+        val selectedCount = adapter.getSelectedMessages().size
+        supportActionBar?.title = "已选择 $selectedCount 条消息"
     }
 
     private fun deleteMessage(messageId: Long) {
@@ -341,86 +344,87 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun uploadFile(uri: Uri) {
-        val contentResolver = applicationContext.contentResolver
-        val inputStream = contentResolver.openInputStream(uri)
-        val mediaType = contentResolver.getType(uri)
-        
-        // 根据 MIME 类型获取正确的文件扩展名
-        val extension = when (mediaType) {
-            "image/jpeg" -> ".jpg"
-            "image/png" -> ".png"
-            "image/gif" -> ".gif"
-            "video/mp4" -> ".mp4"
-            else -> ".tmp"
-        }
-        
-        val file = inputStream?.let { 
-            createTempFile(it, "uploaded_file", extension) 
-        }
+        val file = File(getRealPathFromUri(uri))
+        val requestFile = file.asRequestBody("*/*".toMediaTypeOrNull())
+        val body = MultipartBody.Part.createFormData("file", file.name, requestFile)
 
-        if (file != null) {
-            val requestFile = file.asRequestBody(mediaType?.toMediaTypeOrNull())
-            val body = MultipartBody.Part.createFormData("file", file.name, requestFile)
-
-            ApiClient.apiService.uploadFile(body).enqueue(object : retrofit2.Callback<FileDTO> {
-                override fun onResponse(call: retrofit2.Call<FileDTO>, response: retrofit2.Response<FileDTO>) {
-                    if (response.isSuccessful) {
-                        response.body()?.let { fileDTO ->
-                            handleFileUploadSuccess(fileDTO)
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val response = ApiClient.apiService.uploadFile(body)
+                if (response.isSuccessful) {
+                    response.body()?.let { fileResponse ->
+                        // 发送文件消息
+                        val message = UserPreferences.getUsername(this@ChatActivity)?.let {
+                            ChatMessage(
+                                id = null,
+                                senderId = UserPreferences.getUserId(this@ChatActivity),
+                                senderName = it,
+                                content = fileResponse.url,
+                                type = MessageType.FILE,
+                                receiverId = if (currentChatType == "PRIVATE") currentReceiverId else null,
+                                receiverName = if (currentChatType == "PRIVATE") title else null,
+                                groupId = if (currentChatType == "GROUP") currentGroupId else null,
+                                timestamp = LocalDateTime.now(),
+                                fileUrl = fileResponse.url,
+                                chatType = currentChatType
+                            )
                         }
-                    } else {
+
+                        // 使用 WebSocket 发送消息
+                        withContext(Dispatchers.Main) {
+                            message?.let {
+                                WebSocketManager.sendMessage(it,
+                                    onSuccess = {
+                                        adapter.addMessage(message)
+                                        messagesList.scrollToPosition(adapter.itemCount - 1)
+                                    },
+                                    onError = { error ->
+                                        Toast.makeText(this@ChatActivity, "发送失败: $error", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
                         Toast.makeText(this@ChatActivity, "文件上传失败", Toast.LENGTH_SHORT).show()
                     }
                 }
-
-                override fun onFailure(call: retrofit2.Call<FileDTO>, t: Throwable) {
-                    Toast.makeText(this@ChatActivity, "网络错误", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@ChatActivity, "文件上传失败: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
-            })
-        }
-    }
-
-    private fun handleFileUploadSuccess(fileDTO: FileDTO) {
-        println("⭐ Sending file message:")
-        println("Content type: ${fileDTO.contentType}")
-        println("Filename: ${fileDTO.filename}")
-        println("URL: ${fileDTO.url}")
-
-        // 使用完整的文件 URL 发送消息
-        sendMessage(
-            content = fileDTO.filename,
-            type = "FILE",
-            fileUrl = fileDTO.url  // 传入文件 URL
-        )
-    }
-
-    private fun createTempFile(inputStream: InputStream, filename: String, extension: String): java.io.File? {
-        return try {
-            val tempDir = cacheDir
-            val tempFile = java.io.File.createTempFile(filename, extension, tempDir)
-            tempFile.outputStream().use { outputStream ->
-                inputStream.copyTo(outputStream)
             }
-            tempFile
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
         }
     }
 
-    override fun onBackPressed() {
-        if (isMultiSelectMode) {
-            exitMultiSelectMode()
-        } else {
-            super.onBackPressed()
-        }
+    private fun getRealPathFromUri(uri: Uri): String {
+        val projection = arrayOf(android.provider.MediaStore.Images.Media.DATA)
+        val cursor = contentResolver.query(uri, projection, null, null, null)
+        val columnIndex = cursor?.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.DATA)
+        cursor?.moveToFirst()
+        val path = cursor?.getString(columnIndex ?: 0) ?: ""
+        cursor?.close()
+        return path
+    }
+
+    private fun isImageFile(extension: String): Boolean {
+        return extension in listOf("jpg", "jpeg", "png", "gif", "bmp")
+    }
+
+    private fun isVideoFile(extension: String): Boolean {
+        return extension in listOf("mp4", "avi", "mov", "wmv")
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             android.R.id.home -> {
-                // 处理返回按钮点击
-                onBackPressed()
+                if (isMultiSelectMode) {
+                    exitMultiSelectMode()
+                } else {
+                    finish()
+                }
                 true
             }
             R.id.action_search -> {
@@ -469,56 +473,27 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun showImagePreview(fileUrl: String?) {
-        fileUrl?.let { url ->
-            val intent = Intent(this, ImagePreviewActivity::class.java).apply {
-                putExtra("imageUrl", "${getString(R.string.server_url_format).format(
-                    getString(R.string.server_ip),
-                    getString(R.string.server_port)
-                )}$url")
-            }
+        if (fileUrl != null) {
+            val intent = Intent(this, ImagePreviewActivity::class.java)
+            intent.putExtra("imageUrl", fileUrl)
             startActivity(intent)
         }
     }
 
     private fun showVideoPreview(fileUrl: String?) {
-        fileUrl?.let { url ->
-            val intent = Intent(this, VideoPreviewActivity::class.java).apply {
-                putExtra("videoUrl", "${getString(R.string.server_url_format).format(
-                    getString(R.string.server_ip),
-                    getString(R.string.server_port)
-                )}$url")
-            }
+        if (fileUrl != null) {
+            val intent = Intent(this, VideoPreviewActivity::class.java)
+            intent.putExtra("videoUrl", fileUrl)
             startActivity(intent)
         }
     }
 
     private fun openFile(fileUrl: String?) {
-        fileUrl?.let { url ->
-            val fullUrl = "${getString(R.string.server_url_format).format(
-                getString(R.string.server_ip),
-                getString(R.string.server_port)
-            )}$url"
-            
-            try {
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    data = Uri.parse(fullUrl)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                startActivity(intent)
-            } catch (e: Exception) {
-                Toast.makeText(this, "无法打开此类型的文件", Toast.LENGTH_SHORT).show()
-                e.printStackTrace()
-            }
+        if (fileUrl != null) {
+            // 实现文件下载和打开逻辑
+            Toast.makeText(this, "正在打开文件...", Toast.LENGTH_SHORT).show()
+            // TODO: 实现文件下载和打开
         }
-    }
-
-    // 添加辅助方法
-    private fun isImageFile(extension: String): Boolean {
-        return extension in listOf("jpg", "jpeg", "png", "gif", "webp")
-    }
-
-    private fun isVideoFile(extension: String): Boolean {
-        return extension in listOf("mp4", "3gp", "mkv", "webm")
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -595,11 +570,11 @@ class ChatActivity : AppCompatActivity() {
     private fun setupGroupChat(groupId: Long, groupName: String) {
         currentChatType = "GROUP"
         currentGroupId = groupId
-        title = groupName
-        println("🔄 Setting up group chat - GroupID: $groupId, Name: $groupName, title: $title")
+        receiverName = groupName
+        println("🔄 Setting up group chat - GroupID: $groupId, Name: $groupName, title: $receiverName")
         
         // 设置标题
-        updateToolbarTitle("$groupName (群聊)")
+        supportActionBar?.title = "$groupName (群聊)"
         
         // 加载群聊消息
         loadMessages(groupId, "GROUP")
@@ -611,7 +586,7 @@ class ChatActivity : AppCompatActivity() {
     private fun setupPrivateChat(receiverId: Long, receiverName: String) {
         currentChatType = "PRIVATE"
         currentReceiverId = receiverId
-        title = receiverName
+        this.receiverName = receiverName
         
         // 更新适配器
         adapter = MessageAdapter(
@@ -619,6 +594,22 @@ class ChatActivity : AppCompatActivity() {
             currentUserId = UserPreferences.getUserId(this),
             currentChatType = currentChatType,
             chatPartnerId = receiverId,
+            onMessageLongClick = { position ->
+                if (!isMultiSelectMode) {
+                    enterMultiSelectMode()
+                    adapter.toggleMessageSelection(position)
+                    updateSelectionTitle()
+                    true
+                } else {
+                    false
+                }
+            },
+            onMessageClick = { position ->
+                if (isMultiSelectMode) {
+                    adapter.toggleMessageSelection(position)
+                    updateSelectionTitle()
+                }
+            },
             onMessageDelete = { messageId ->
                 lifecycleScope.launch {
                     try {
@@ -644,7 +635,7 @@ class ChatActivity : AppCompatActivity() {
         markMessagesAsRead(receiverId, currentChatType)
         
         // 更新工具栏标题
-        updateToolbarTitle(receiverName)
+        supportActionBar?.title = receiverName
         
         // 确保 WebSocket 已连接
         if (!WebSocketManager.isConnected()) {
@@ -705,44 +696,53 @@ class ChatActivity : AppCompatActivity() {
         val userId = UserPreferences.getUserId(this)
         val username = UserPreferences.getUsername(this)
         
-        val message = ChatMessage(
-            id = null,
-            senderId = userId,
-            senderName = username,
-            content = content,
-            type = MessageType.valueOf(type),
-            receiverId = if (currentChatType == "PRIVATE") currentReceiverId else null,
-            receiverName = if (currentChatType == "PRIVATE") title else null,
-            groupId = if (currentChatType == "GROUP") currentGroupId else null,
-            timestamp = LocalDateTime.now(),
-            fileUrl = fileUrl,  // 确保设置文件 URL
-            chatType = currentChatType
-        )
+        val message = username?.let {
+            ChatMessage(
+                id = null,
+                senderId = userId,
+                senderName = it,
+                content = content,
+                type = MessageType.valueOf(type),
+                receiverId = if (currentChatType == "PRIVATE") currentReceiverId else null,
+                receiverName = if (currentChatType == "PRIVATE") title else null,
+                groupId = if (currentChatType == "GROUP") currentGroupId else null,
+                timestamp = LocalDateTime.now(),
+                fileUrl = fileUrl,  // 确保设置文件 URL
+                chatType = currentChatType
+            )
+        }
         
         // 发送到服务器
-        WebSocketManager.sendMessage(message, 
-            onSuccess = {
-                // 消息发送成功后再添加到UI，使用带有 fileUrl 的消息对象
-                runOnUiThread {
-                    adapter.addMessage(message)
-                    messagesList.scrollToPosition(adapter.itemCount - 1)
+        message?.let {
+            WebSocketManager.sendMessage(it,
+                onSuccess = {
+                    // 消息发送成功后再添加到UI，使用带有 fileUrl 的消息对象
+                    runOnUiThread {
+                        adapter.addMessage(message)
+                        messagesList.scrollToPosition(adapter.itemCount - 1)
+                    }
+                },
+                onError = { error ->
+                    runOnUiThread {
+                        Toast.makeText(this, "发送失败: $error", Toast.LENGTH_SHORT).show()
+                    }
                 }
-            },
-            onError = { error ->
-                runOnUiThread {
-                    Toast.makeText(this, "发送失败: $error", Toast.LENGTH_SHORT).show()
-                }
-            }
-        )
+            )
+        }
     }
 
     private fun setupToolbar() {
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
         setSupportActionBar(toolbar)
         supportActionBar?.apply {
-            setDisplayShowTitleEnabled(true)  // 启用标题显示
             setDisplayHomeAsUpEnabled(true)
             setDisplayShowHomeEnabled(true)
+            // 设置初始标题
+            title = when (currentChatType) {
+                "PRIVATE" -> receiverName
+                "GROUP" -> "$receiverName (群聊)"
+                else -> receiverName
+            }
         }
     }
 
@@ -755,7 +755,8 @@ class ChatActivity : AppCompatActivity() {
                 val groupName = intent.getStringExtra("group_name") ?: ""
                 if (groupId != -1L) {
                     currentGroupId = groupId
-                    title = "$groupName (群聊)"  // 直接在这里设置带(群聊)的标题
+                    receiverName = groupName
+                    supportActionBar?.title = "$groupName (群聊)"  // 使用 supportActionBar 设置标题
                     setupGroupChat(groupId, groupName)
                 } else {
                     handleInvalidChat()
@@ -766,17 +767,14 @@ class ChatActivity : AppCompatActivity() {
                 val receiverName = intent.getStringExtra("receiver_name") ?: ""
                 if (receiverId != -1L) {
                     currentReceiverId = receiverId
-                    title = receiverName
+                    this.receiverName = receiverName
+                    supportActionBar?.title = receiverName  // 使用 supportActionBar 设置标题
                     setupPrivateChat(receiverId, receiverName)
                 } else {
                     handleInvalidChat()
                 }
             }
         }
-        
-        // 更新工具栏标题
-        // 删除这行，因为已经通过 ActionBar 设置了标题
-        /* findViewById<TextView>(R.id.toolbarTitle).text = title  // 删除这行 */
     }
 
     private fun handleInvalidChat() {
@@ -810,4 +808,82 @@ class ChatActivity : AppCompatActivity() {
 
     // 添加 SessionUpdateEvent 类
     class SessionUpdateEvent
+
+    private fun showDeleteConfirmDialog(messages: List<ChatMessage>) {
+        AlertDialog.Builder(this)
+            .setTitle("删除消息")
+            .setMessage("确定要删除选中的 ${messages.size} 条消息吗？")
+            .setPositiveButton("确定") { _, _ ->
+                deleteSelectedMessages(messages)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun deleteSelectedMessages(messages: List<ChatMessage>) {
+        lifecycleScope.launch {
+            try {
+                var successCount = 0
+                var failCount = 0
+                
+                // 逐个删除消息
+                for (message in messages) {
+                    message.id?.let { messageId ->
+                        try {
+                            val response = ApiClient.apiService.deleteMessage(
+                                messageId = messageId,
+                                userId = UserPreferences.getUserId(this@ChatActivity)
+                            )
+                            if (response.isSuccessful) {
+                                successCount++
+                                // 从界面上移除消息
+                                runOnUiThread {
+                                    adapter.removeMessage(messageId)
+                                }
+                            } else {
+                                failCount++
+                            }
+                        } catch (e: Exception) {
+                            failCount++
+                        }
+                    }
+                }
+
+                // 显示删除结果
+                runOnUiThread {
+                    when {
+                        failCount == 0 -> {
+                            Toast.makeText(this@ChatActivity, "删除成功", Toast.LENGTH_SHORT).show()
+                            exitMultiSelectMode()
+                        }
+                        successCount == 0 -> {
+                            Toast.makeText(this@ChatActivity, "删除失败", Toast.LENGTH_SHORT).show()
+                        }
+                        else -> {
+                            Toast.makeText(this@ChatActivity, 
+                                "成功删除 $successCount 条消息，失败 $failCount 条", 
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            exitMultiSelectMode()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this@ChatActivity, "网络错误", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun setupDeleteButton() {
+        deleteButton = findViewById(R.id.deleteButton)
+        deleteButton.visibility = View.GONE
+        deleteButton.setOnClickListener {
+            val selectedMessages = adapter.getSelectedMessages()
+            if (selectedMessages.isNotEmpty()) {
+                showDeleteConfirmDialog(selectedMessages)
+            }
+        }
+    }
 }

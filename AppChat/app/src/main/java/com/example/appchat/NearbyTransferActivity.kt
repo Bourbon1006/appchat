@@ -208,7 +208,7 @@ class NearbyTransferActivity : AppCompatActivity() {
             .build()
         
         nearbyConnectionsClient.startAdvertising(
-            UserPreferences.getUsername(this),
+            UserPreferences.getUsername(this) ?: "Unknown",
             SERVICE_ID,
             connectionLifecycleCallback,
             advertisingOptions
@@ -231,7 +231,7 @@ class NearbyTransferActivity : AppCompatActivity() {
         try {
             // 创建连接信息
             val connectionInfo = JSONObject().apply {
-                put("username", UserPreferences.getUsername(this@NearbyTransferActivity))
+                put("username", UserPreferences.getUsername(this@NearbyTransferActivity) ?: "Unknown")
                 put("serviceId", SERVICE_ID)
                 // 可以添加其他需要的信息
             }
@@ -582,7 +582,7 @@ class NearbyTransferActivity : AppCompatActivity() {
                             // 停止搜索，开始连接
                             stopDiscovery()
                             nearbyConnectionsClient.requestConnection(
-                                UserPreferences.getUsername(this@NearbyTransferActivity),
+                                UserPreferences.getUsername(this@NearbyTransferActivity) ?: "Unknown",
                                 endpointId,
                                 connectionLifecycleCallback
                             ).addOnSuccessListener {
@@ -618,7 +618,7 @@ class NearbyTransferActivity : AppCompatActivity() {
                 .setMessage("是否连接到设备：${info.endpointName}？")
                 .setPositiveButton("连接") { _, _ ->
                     nearbyConnectionsClient.requestConnection(
-                        UserPreferences.getUsername(this),
+                        UserPreferences.getUsername(this) ?: "Unknown",
                         endpointId,
                         connectionLifecycleCallback
                     ).addOnSuccessListener {

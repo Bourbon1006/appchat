@@ -66,11 +66,11 @@ class LoginActivity : AppCompatActivity() {
                 if (response.isSuccessful) {
                     response.body()?.let { authResponse ->
                         // 保存用户信息
-                        UserPreferences.saveUserInfo(
-                            context = this@LoginActivity,
-                            userId = authResponse.userId,
-                            username = authResponse.username,
-                            token = authResponse.token  // token 可能为 null
+                        UserPreferences.saveUserData(
+                            this@LoginActivity,
+                            authResponse.userId,
+                            authResponse.token,
+                            authResponse.username
                         )
 
                         // 跳转到主界面

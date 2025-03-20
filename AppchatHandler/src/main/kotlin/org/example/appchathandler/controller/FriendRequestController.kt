@@ -4,13 +4,17 @@ import org.example.appchathandler.dto.UserDTO
 import org.example.appchathandler.entity.FriendRequest
 import org.example.appchathandler.entity.User
 import org.example.appchathandler.service.FriendRequestService
+import org.example.appchathandler.websocket.ChatWebSocketHandler
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import java.time.LocalDateTime
 
 @RestController
-@RequestMapping("/api/friend-requests")
-class FriendRequestController(private val friendRequestService: FriendRequestService) {
+@RequestMapping("/api/friends")
+class FriendRequestController(
+    private val friendRequestService: FriendRequestService,
+    private val webSocketHandler: ChatWebSocketHandler
+) {
     
     data class FriendRequestDTO(
         val id: Long,
@@ -40,27 +44,50 @@ class FriendRequestController(private val friendRequestService: FriendRequestSer
         timestamp = timestamp.toString()
     )
     
-    @PostMapping
+    @PostMapping("/request")
     fun sendFriendRequest(
         @RequestParam senderId: Long,
         @RequestParam receiverId: Long
-    ): ResponseEntity<FriendRequestDTO> {
+    ): ResponseEntity<Unit> {
         return try {
             val request = friendRequestService.sendFriendRequest(senderId, receiverId)
-            ResponseEntity.ok(request.toDTO())
+            // 通过 WebSocket 通知接收者
+            webSocketHandler.sendFriendRequest(request)
+            ResponseEntity.ok().build()
         } catch (e: Exception) {
             ResponseEntity.badRequest().build()
         }
     }
-    @PutMapping("/{requestId}")
+
+    @PostMapping("/handle")
     fun handleFriendRequest(
-        @PathVariable requestId: Long,
+        @RequestParam requestId: Long,
         @RequestParam accept: Boolean
-    ): ResponseEntity<FriendRequestDTO> {
+    ): ResponseEntity<Unit> {
         return try {
-            val request = friendRequestService.handleFriendRequest(requestId, accept)
-            ResponseEntity.ok(request.toDTO())
+            println("📝 收到好友请求处理: requestId=$requestId, accept=$accept")
+            
+            val request = friendRequestService.getFriendRequest(requestId)
+            if (request == null) {
+                println("❌ 未找到好友请求: $requestId")
+                return ResponseEntity.notFound().build()
+            }
+            
+            if (request.status.toString() != "PENDING") {
+                println("⚠️ 请求状态不是 PENDING: ${request.status}")
+                return ResponseEntity.badRequest().build()
+            }
+            
+            val updatedRequest = friendRequestService.handleFriendRequest(requestId, accept)
+            println("✅ 好友请求处理成功: ${updatedRequest.status}")
+            
+            // 通知相关用户
+            webSocketHandler.notifyFriendRequestResult(updatedRequest)
+            
+            ResponseEntity.ok().build()
         } catch (e: Exception) {
+            println("❌ 处理好友请求失败: ${e.message}")
+            e.printStackTrace()
             ResponseEntity.badRequest().build()
         }
     }

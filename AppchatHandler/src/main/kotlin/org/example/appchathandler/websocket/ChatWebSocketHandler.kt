@@ -1,9 +1,6 @@
 package org.example.appchathandler.websocket
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import org.example.appchathandler.entity.Message
-import org.example.appchathandler.entity.MessageType
-import org.example.appchathandler.entity.FriendRequest
 import org.example.appchathandler.service.MessageService
 import org.example.appchathandler.service.UserService
 import org.example.appchathandler.service.FriendRequestService
@@ -17,7 +14,6 @@ import java.time.LocalDateTime
 import java.util.concurrent.ConcurrentHashMap
 import com.fasterxml.jackson.databind.JsonNode
 import org.example.appchathandler.dto.WebSocketMessageDTO
-import org.example.appchathandler.entity.User
 import org.example.appchathandler.dto.MessageDTO
 import org.springframework.context.event.EventListener
 import org.example.appchathandler.event.SessionsUpdateEvent
@@ -26,7 +22,9 @@ import org.json.JSONObject
 import org.example.appchathandler.dto.toDTO
 import org.example.appchathandler.dto.toStatusDTO
 import com.fasterxml.jackson.core.type.TypeReference
+import org.example.appchathandler.entity.*
 import org.example.appchathandler.event.SessionUpdateEvent
+import org.example.appchathandler.service.FriendService
 
 @Component
 class ChatWebSocketHandler(
@@ -34,7 +32,8 @@ class ChatWebSocketHandler(
     private val userService: UserService,
     private val friendRequestService: FriendRequestService,
     private val objectMapper: ObjectMapper,
-    private val groupService: GroupService
+    private val groupService: GroupService,
+    private val friendService: FriendService
 ) : TextWebSocketHandler() {
 
     data class UserStatusDTO(
@@ -73,6 +72,25 @@ class ChatWebSocketHandler(
                 // 保存会话
                 sessions[userId] = session
                 
+                // 获取并发送所有待处理的好友请求
+                val pendingRequests = friendRequestService.getPendingRequests(userId)
+                if (pendingRequests.isNotEmpty()) {
+                    println("📬 Found ${pendingRequests.size} pending friend requests for user $userId")
+                    pendingRequests.forEach { request ->
+                        println("📨 Sending pending friend request from ${request.sender.username}")
+                        val message = mapOf(
+                            "type" to "FRIEND_REQUEST",
+                            "senderId" to request.sender.id,
+                            "senderName" to request.sender.username,
+                            "message" to "${request.sender.username} 请求添加您为好友",
+                            "requestId" to request.id
+                        )
+                        session.sendMessage(TextMessage(objectMapper.writeValueAsString(message)))
+                    }
+                } else {
+                    println("📭 No pending friend requests for user $userId")
+                }
+                
                 // 获取在线用户列表（排除自己）
                 val onlineUsers = userService.getOnlineUsers()
                     .filter { it.id != userId }
@@ -82,7 +100,7 @@ class ChatWebSocketHandler(
                             username = onlineUser.username,
                             nickname = onlineUser.nickname,
                             avatarUrl = onlineUser.avatarUrl,
-                            isOnline = true  // 确保在线状态正确
+                            isOnline = true
                         )
                     }
                 
@@ -91,6 +109,8 @@ class ChatWebSocketHandler(
                     "type" to "users",
                     "users" to onlineUsers
                 ))))
+
+                // 广播用户上线状态
                 val userInfo = mapOf(
                     "id" to user.id,
                     "username" to user.username,
@@ -106,21 +126,12 @@ class ChatWebSocketHandler(
                         ))))
                     }
                 }
-                // 发送待处理的好友请求
-                val pendingRequests = friendRequestService.getPendingRequests(userId)
-                if (pendingRequests.isNotEmpty()) {
-                    pendingRequests.forEach { request ->
-                        session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
-                            "type" to "friendRequest",
-                            "friendRequest" to request.toDTO()
-                        ))))
-                    }
-                }
                 
                 // 添加日志
                 println("🔌 WebSocket connection established for user $userId")
                 println("🔌 Current active sessions: ${sessions.keys}")
             } catch (e: Exception) {
+                println("❌ Error in afterConnectionEstablished: ${e.message}")
                 e.printStackTrace()
                 session.close()
             }
@@ -167,7 +178,11 @@ class ChatWebSocketHandler(
                         )
                     }
                 }
-                "FRIEND_REQUEST" -> handleFriendRequest(jsonNode, session)
+                "FRIEND_REQUEST" -> handleFriendRequest(
+                    senderId = jsonNode.get("senderId").asLong(),
+                    receiverId = jsonNode.get("receiverId").asLong(),
+                    session = session
+                )
                 "CREATE_GROUP" -> handleCreateGroup(jsonNode, session)
                 "HANDLE_FRIEND_REQUEST" -> {
                     val requestId = jsonNode["requestId"]?.asLong() ?: throw IllegalArgumentException("requestId is required")
@@ -290,42 +305,45 @@ class ChatWebSocketHandler(
             )))
         }
     }
-    private fun handleFriendRequest(message: JsonNode, session: WebSocketSession) {
+    private fun handleFriendRequest(senderId: Long, receiverId: Long, session: WebSocketSession) {
         try {
-            println("⭐ Processing friend request with message: $message")
-            val senderId = message["senderId"]?.asLong() ?: 0
-            val receiverId = message["receiverId"]?.asLong() ?: 0
-            println("✉️ Sending friend request from user $senderId to user $receiverId")
+            // 1. 保存好友请求到数据库
             val request = friendRequestService.sendFriendRequest(senderId, receiverId)
-            println("✅ Friend request created successfully: $request")
-            // 通知接收者
-            // 无论接收者是否在线，都保存好友请求到数据库
-            // 如果接收者在线，立即发送通知
-            sessions[receiverId]?.let { receiverSession ->
-                println("📨 Sending notification to receiver (userId: $receiverId)")
-                receiverSession.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
-                    "type" to "friendRequest",
-                    "friendRequest" to request.toDTO()
-                ))))
-                println("✅ Notification sent to receiver successfully")
+            
+            // 2. 如果接收者在线，立即推送
+            val receiverSession = sessions[receiverId]
+            if (receiverSession != null && receiverSession.isOpen) {
+                println("📬 Receiver is online, sending friend request immediately")
+                val message = mapOf(
+                    "type" to "FRIEND_REQUEST",
+                    "senderId" to request.sender.id,
+                    "senderName" to request.sender.username,
+                    "message" to "${request.sender.username} 请求添加您为好友",
+                    "requestId" to request.id
+                )
+                receiverSession.sendMessage(TextMessage(objectMapper.writeValueAsString(message)))
+            } else {
+                println("📫 Receiver is offline, request will be sent when they reconnect")
             }
-            // 如果接收者离线，请求会保存在数据库中，等待用户上线时通过getFriendRequests API获取
-            // 通知发送者请求已发送
-            sessions[senderId]?.let { senderSession ->
-                println("📤 Sending confirmation to sender (userId: $senderId)")
-                senderSession.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
-                    "type" to "friendRequestSent",
-                    "friendRequest" to request.toDTO()
-                ))))
-                println("✅ Confirmation sent to sender successfully")
-            } ?: println("⚠️ Sender (userId: $senderId) is not online")
+
+            // 3. 通知发送者请求已发送
+            val responseMessage = mapOf(
+                "type" to "FRIEND_REQUEST_SENT",
+                "success" to true
+            )
+            session.sendMessage(TextMessage(objectMapper.writeValueAsString(responseMessage)))
+
         } catch (e: Exception) {
             println("❌ Error handling friend request: ${e.message}")
             e.printStackTrace()
-            session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
-                "type" to "error",
-                "message" to e.message
-            ))))
+            
+            val errorMessage = mapOf(
+                "type" to "FRIEND_REQUEST_SENT",
+                "success" to false,
+                "error" to (e.message ?: "Unknown error")
+            )
+            
+            session.sendMessage(TextMessage(objectMapper.writeValueAsString(errorMessage)))
         }
     }
     private fun handleCreateGroup(message: JsonNode, session: WebSocketSession) {
@@ -414,29 +432,25 @@ class ChatWebSocketHandler(
     fun sendFriendRequest(request: FriendRequest) {
         val receiverId = request.receiver.id
         println("🔍 Attempting to send friend request to user $receiverId")
-        println("🔍 Active sessions: ${sessions.keys}")
         
         val session = sessions[receiverId]
-        
         if (session != null && session.isOpen) {
             try {
-                // 使用 DTO 对象而不是直接使用实体对象
                 val friendRequestDTO = request.toDTO()
-                
                 val message = mapOf(
                     "type" to "friendRequest",
                     "friendRequest" to friendRequestDTO
                 )
                 val messageJson = objectMapper.writeValueAsString(message)
-                println("📝 Friend request message: $messageJson")
+                println("📝 Sending friend request: $messageJson")
                 session.sendMessage(TextMessage(messageJson))
-                println("📤 Sent friend request notification to user $receiverId")
+                println("✅ Friend request sent successfully to user $receiverId")
             } catch (e: Exception) {
-                println("❌ Error sending friend request notification: ${e.message}")
+                println("❌ Error sending friend request: ${e.message}")
                 e.printStackTrace()
             }
         } else {
-            println("⚠️ No active session found for user $receiverId (session=${session}, isOpen=${session?.isOpen})")
+            println("📫 User $receiverId is offline, request will be sent when they reconnect")
         }
     }
 
@@ -514,5 +528,28 @@ class ChatWebSocketHandler(
     @EventListener
     fun handleSessionUpdateEvent(event: SessionUpdateEvent) {
         sendToUser(event.userId, event.message)
+    }
+
+    fun notifyFriendRequestResult(request: FriendRequest) {
+        println("📢 通知好友请求结果: requestId=${request.id}, status=${request.status}")
+        
+        val senderSession = sessions[request.sender.id]
+        if (senderSession != null && senderSession.isOpen) {
+            val message = mapOf(
+                "type" to "FRIEND_REQUEST_RESULT",
+                "requestId" to request.id,
+                "status" to request.status.toString(),
+                "accepted" to (request.status.toString() == "ACCEPTED")
+            )
+            try {
+                senderSession.sendMessage(TextMessage(objectMapper.writeValueAsString(message)))
+                println("✅ 已通知发送者 ${request.sender.username}")
+            } catch (e: Exception) {
+                println("❌ 通知发送者失败: ${e.message}")
+                e.printStackTrace()
+            }
+        } else {
+            println("⚠️ 发送者 ${request.sender.username} 不在线")
+        }
     }
 }

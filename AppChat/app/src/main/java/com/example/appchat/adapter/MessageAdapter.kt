@@ -55,7 +55,9 @@ class MessageAdapter(
     private val currentUserId: Long,
     private val currentChatType: String,  // 'private' 或 'group'
     private val chatPartnerId: Long,  // 私聊对象ID或群组ID
-    private val onMessageDelete: (Long) -> Unit
+    private val onMessageLongClick: (Int) -> Boolean,  // 添加长按回调
+    private val onMessageClick: (Int) -> Unit,         // 添加点击回调
+    private val onMessageDelete: (Long) -> Unit        // 保留原有的删除回调
 ) : RecyclerView.Adapter<MessageAdapter.MessageViewHolder>() {
 
     private val messages = mutableListOf<ChatMessage>()
@@ -63,10 +65,15 @@ class MessageAdapter(
     private var highlightedPosition: Int = -1
     private var isMultiSelectMode = false
     private val selectedMessages = mutableSetOf<Long>()
-    private var itemLongClickListener: ((Int) -> Boolean)? = null
+    private var onItemLongClickListener: ((Int) -> Boolean)? = null
+    private var onItemClickListener: ((Int) -> Unit)? = null
 
     fun setOnItemLongClickListener(listener: (Int) -> Boolean) {
-        itemLongClickListener = listener
+        onItemLongClickListener = listener
+    }
+
+    fun setOnItemClickListener(listener: (Int) -> Unit) {
+        onItemClickListener = listener
     }
 
     fun enterMultiSelectMode() {
@@ -80,14 +87,13 @@ class MessageAdapter(
         notifyDataSetChanged()
     }
 
-    fun toggleMessageSelection(messageId: Long) {
-        if (selectedMessages.contains(messageId)) {
-            selectedMessages.remove(messageId)
-        } else {
-            selectedMessages.add(messageId)
-        }
-        val position = messages.indexOfFirst { it.id == messageId }
-        if (position != -1) {
+    fun toggleMessageSelection(position: Int) {
+        messages[position].id?.let { messageId ->
+            if (selectedMessages.contains(messageId)) {
+                selectedMessages.remove(messageId)
+            } else {
+                selectedMessages.add(messageId)
+            }
             notifyItemChanged(position)
         }
     }
@@ -139,8 +145,8 @@ class MessageAdapter(
         val position = messages.indexOfFirst { it.id == messageId }
         if (position != -1) {
             messages.removeAt(position)
-            notifyItemRemoved(position)
             selectedMessages.remove(messageId)
+            notifyItemRemoved(position)
         }
     }
 
@@ -190,18 +196,19 @@ class MessageAdapter(
         notifyDataSetChanged()
     }
 
-    fun getSelectedMessages(): List<Long> {
-        return selectedMessages.toList()
+    fun getSelectedMessages(): List<ChatMessage> {
+        return messages.filter { it.id in selectedMessages }
     }
 
-    fun removeMessages(messageIds: Set<Long>) {
+    fun removeMessages(messageIds: List<Long>) {
         val iterator = messages.iterator()
         while (iterator.hasNext()) {
             val message = iterator.next()
-            if (messageIds.contains(message.id)) {
+            if (message.id in messageIds) {
                 iterator.remove()
             }
         }
+        selectedMessages.removeAll(messageIds.toSet())
         notifyDataSetChanged()
     }
 
@@ -210,6 +217,11 @@ class MessageAdapter(
     }
 
     fun getMessages(): List<ChatMessage> = messages.toList()
+
+    fun clearSelectedMessages() {
+        selectedMessages.clear()
+        notifyDataSetChanged()
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MessageViewHolder {
         val layout = when (viewType) {
@@ -223,7 +235,31 @@ class MessageAdapter(
     override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
         val message = messages[position]
         val previousMessage = if (position > 0) messages[position - 1] else null
-        holder.bind(message, previousMessage)  // 调用 ViewHolder 的 bind 方法
+        
+        // 设置选中状态的背景和复选框
+        holder.itemView.setBackgroundResource(
+            if (message.id in selectedMessages) 
+                R.drawable.selected_message_background 
+            else 
+                android.R.color.transparent
+        )
+        
+        // 显示/隐藏复选框并设置状态
+        holder.checkbox.apply {
+            visibility = if (isMultiSelectMode) View.VISIBLE else View.GONE
+            isChecked = message.id in selectedMessages
+        }
+        
+        // 设置长按和点击事件
+        holder.itemView.setOnLongClickListener {
+            onMessageLongClick(position)
+        }
+        
+        holder.itemView.setOnClickListener {
+            onMessageClick(position)
+        }
+
+        holder.bind(message, previousMessage)
     }
 
     override fun getItemCount() = messages.size
@@ -255,7 +291,7 @@ class MessageAdapter(
         private val playIcon: ImageView? = itemView.findViewById(R.id.playIcon)
         private val avatarImage: ImageView = itemView.findViewById(R.id.avatar)
             ?: throw IllegalStateException("Required view 'avatar' not found")
-        private val checkbox: CheckBox = itemView.findViewById(R.id.messageCheckbox)
+        val checkbox: CheckBox = itemView.findViewById(R.id.messageCheckbox)
             ?: throw IllegalStateException("Required view 'messageCheckbox' not found")
         private val senderName: TextView = itemView.findViewById(R.id.senderName)
 
@@ -324,32 +360,6 @@ class MessageAdapter(
                     text = message.senderName
                 } else {
                     visibility = View.GONE
-                }
-            }
-
-            // 添加长按事件监听
-            itemView.setOnLongClickListener {
-                message.id?.let { messageId ->
-                    if (!isMultiSelectMode) {
-                        itemLongClickListener?.invoke(adapterPosition)
-                    }
-                }
-                true
-            }
-
-            // 添加点击事件监听
-            itemView.setOnClickListener {
-                if (isMultiSelectMode) {
-                    message.id?.let { messageId -> toggleMessageSelection(messageId) }
-                }
-            }
-
-            // 设置多选模式
-            checkbox.apply {
-                visibility = if (isMultiSelectMode) View.VISIBLE else View.GONE
-                isChecked = selectedMessages.contains(message.id)
-                setOnClickListener {
-                    message.id?.let { messageId -> toggleMessageSelection(messageId) }
                 }
             }
 
@@ -605,5 +615,72 @@ class MessageAdapter(
                 }
             }
             .show()
+    }
+
+    private fun showImagePreview(imageUrl: String?) {
+        if (imageUrl == null) return
+        val intent = Intent(context, ImagePreviewActivity::class.java).apply {
+            putExtra("imageUrl", imageUrl)
+        }
+        context.startActivity(intent)
+    }
+
+    private fun showVideoPreview(videoUrl: String?) {
+        if (videoUrl == null) return
+        val intent = Intent(context, VideoPreviewActivity::class.java).apply {
+            putExtra("videoUrl", videoUrl)
+        }
+        context.startActivity(intent)
+    }
+
+    private fun openFile(fileUrl: String?) {
+        if (fileUrl == null) return
+        
+        val fileName = fileUrl.substringAfterLast("/")
+        val extension = fileName.substringAfterLast(".", "")
+        
+        // 创建下载请求
+        val request = DownloadManager.Request(Uri.parse(fileUrl))
+            .setTitle(fileName)
+            .setDescription("正在下载文件...")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true)
+
+        // 获取下载管理器
+        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        
+        // 开始下载
+        val downloadId = downloadManager.enqueue(request)
+        
+        // 注册下载完成的广播接收器
+        val onComplete = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
+                if (id == downloadId) {
+                    Toast.makeText(context, "下载完成", Toast.LENGTH_SHORT).show()
+                    context.unregisterReceiver(this)
+                    
+                    // 通知系统扫描新文件
+                    val file = File(
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                        fileName
+                    )
+                    MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(file.absolutePath),
+                        null
+                    ) { _, uri ->
+                        // 可以在这里处理扫描完成后的操作
+                    }
+                }
+            }
+        }
+        
+        context.registerReceiver(
+            onComplete,
+            IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+        )
     }
 }

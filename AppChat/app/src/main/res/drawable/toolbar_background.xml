@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 底部阴影 -->
+    <item>
+        <shape>
+            <padding android:top="1dp"/>
+            <solid android:color="#20000000"/>
+        </shape>
+    </item>
+    
+    <!-- 渐变背景 -->
+    <item>
+        <shape>
+            <gradient
+                android:angle="135"
+                android:startColor="@color/purple_700"
+                android:centerColor="@color/purple_500"
+                android:endColor="@color/primary_light"
+                android:type="linear"/>
+        </shape>
+    </item>
+</layer-list> 

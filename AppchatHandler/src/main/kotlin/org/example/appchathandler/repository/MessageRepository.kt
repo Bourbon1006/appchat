@@ -365,32 +365,36 @@ interface MessageRepository : JpaRepository<Message, Long> {
 
     @Query("""
         SELECT m FROM Message m 
-        WHERE m.group IS NULL
-        AND ((m.sender.id = :userId AND m.receiver.id = :otherId)
+        WHERE m.group IS NULL 
+        AND ((m.sender.id = :userId AND m.receiver.id = :otherId) 
         OR (m.sender.id = :otherId AND m.receiver.id = :userId))
         AND :userId NOT MEMBER OF m.deletedForUsers
         ORDER BY m.timestamp DESC
         LIMIT 1
     """)
-    fun findLastPrivateMessage(userId: Long, senderId: Long, receiverId: Long): Message?
+    fun findLastPrivateMessage(
+        @Param("userId") userId: Long,
+        @Param("otherId") otherId: Long
+    ): Message?
 
     @Query("""
         SELECT m FROM Message m 
-        WHERE m.group IS NULL
-        AND ((m.sender.id = :userId AND m.receiver.id = :otherId)
+        WHERE m.group IS NULL 
+        AND ((m.sender.id = :userId AND m.receiver.id = :otherId) 
         OR (m.sender.id = :otherId AND m.receiver.id = :userId))
         AND :userId NOT MEMBER OF m.deletedForUsers
         AND m.id != (
-            SELECT m2.id FROM Message m2 
-            WHERE m2.group IS NULL
-            AND ((m2.sender.id = :userId AND m2.receiver.id = :otherId)
+            SELECT MAX(m2.id) FROM Message m2 
+            WHERE m2.group IS NULL 
+            AND ((m2.sender.id = :userId AND m2.receiver.id = :otherId) 
             OR (m2.sender.id = :otherId AND m2.receiver.id = :userId))
             AND :userId NOT MEMBER OF m2.deletedForUsers
-            ORDER BY m2.timestamp DESC
-            LIMIT 1
         )
         ORDER BY m.timestamp DESC
         LIMIT 1
     """)
-    fun findSecondLastPrivateMessage(userId: Long, senderId: Long, receiverId: Long): Message?
+    fun findSecondLastPrivateMessage(
+        @Param("userId") userId: Long,
+        @Param("otherId") otherId: Long
+    ): Message?
 }

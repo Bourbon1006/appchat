@@ -4,8 +4,8 @@ import java.time.LocalDateTime
 
 data class FriendRequest(
     val id: Long,
-    val sender: User,
-    val receiver: User,
+    val sender: UserDTO,
+    val receiver: UserDTO,
     val status: String,
-    val timestamp: LocalDateTime
+    val timestamp: String
 ) 

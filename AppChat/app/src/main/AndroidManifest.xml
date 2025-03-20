@@ -82,6 +82,10 @@
             android:label="面对面快传"
             android:exported="false" />
 
+        <activity
+            android:name=".activity.CreateMomentActivity"
+            android:label="发布动态" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"

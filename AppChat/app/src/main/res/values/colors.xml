@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="colorPrimary">#6200EE</color>
+    <color name="colorPrimaryDark">#3700B3</color>
+    <color name="colorAccent">#03DAC5</color>
     <color name="purple_200">#FFBB86FC</color>
     <color name="purple_500">#FF6200EE</color>
     <color name="purple_700">#FF3700B3</color>
@@ -7,7 +10,7 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <color name="chat_background">#F5F5F5</color>
+    <color name="chat_background">#F8F9FA</color>
     
     <!-- 自定义颜色 -->
     <color name="message_sent_background">@color/purple_500</color>
@@ -25,4 +28,20 @@
     <color name="text_secondary">#757575</color>
     <color name="divider">#BDBDBD</color>
     <color name="search_highlight">#336200EE</color>
+    <color name="red">#FF0000</color>
+    <color name="icon_color">#666666</color>
+    <color name="hint_color">#999999</color>
+    <color name="text_color">#333333</color>
+
+    <!-- 主题颜色 -->
+    <color name="primary_light">#9C27B0</color>  
+    <color name="accent_purple">#E1BEE7</color>
+    
+    <!-- 状态颜色 -->
+    <color name="online_status">#4CAF50</color>
+    <color name="offline_status">#9E9E9E</color>
+    
+    <!-- 背景颜色 -->
+    <color name="background_light">#FAFAFA</color>
+    <color name="divider_purple">#1A9C27B0</color>
 </resources>

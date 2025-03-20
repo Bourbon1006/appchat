@@ -16,6 +16,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
+        vectorDrawables.useSupportLibrary = true
     }
 
     buildTypes {
@@ -78,4 +79,5 @@ dependencies {
     
     // ML Kit for barcode scanning
     implementation("com.google.mlkit:barcode-scanning:17.2.0")
+    implementation("androidx.fragment:fragment-ktx:1.6.2")
 }

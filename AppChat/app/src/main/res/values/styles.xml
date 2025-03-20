@@ -1,8 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:android="http://schemas.android.com/apk/res/android">
-    <style name="ToolbarTitleStyle" parent="TextAppearance.Widget.AppCompat.Toolbar.Title">
+    <style name="ToolbarStyle" parent="Widget.MaterialComponents.Toolbar.Primary">
+        <item name="android:background">@drawable/toolbar_background</item>
+        <item name="android:elevation">4dp</item>
+        <item name="titleTextAppearance">@style/ToolbarTitleStyle</item>
+        <item name="android:theme">@style/ThemeOverlay.AppCompat.Dark.ActionBar</item>
+        <item name="popupTheme">@style/ThemeOverlay.AppCompat.Light</item>
+    </style>
+
+    <style name="ToolbarTitleStyle" parent="TextAppearance.MaterialComponents.Headline6">
         <item name="android:textSize">20sp</item>
-        <item name="android:layout_marginEnd">48dp</item>
+        <item name="android:textColor">@color/white</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:shadowColor">#40000000</item>
+        <item name="android:shadowDx">0</item>
+        <item name="android:shadowDy">1</item>
+        <item name="android:shadowRadius">2</item>
     </style>
 
     <style name="ToolbarMenuStyle" parent="Widget.AppCompat.ActionButton.Overflow">
@@ -25,8 +38,10 @@
         <item name="toolbarStyle">@style/Widget.Toolbar</item>
     </style>
 
-    <style name="Widget.Toolbar" parent="Widget.AppCompat.Toolbar">
-        <item name="android:background">?attr/colorPrimary</item>
+    <style name="Widget.Toolbar" parent="Widget.MaterialComponents.Toolbar.Primary">
+        <item name="android:background">@drawable/toolbar_background</item>
+        <item name="android:elevation">4dp</item>
+        <item name="titleTextAppearance">@style/ToolbarTitleStyle</item>
         <item name="android:theme">@style/ThemeOverlay.AppCompat.Dark.ActionBar</item>
         <item name="popupTheme">@style/ThemeOverlay.AppCompat.Light</item>
     </style>

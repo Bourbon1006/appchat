@@ -86,115 +86,68 @@ import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
 import com.example.appchat.api.RetrofitClient
 import android.util.Log
+import com.example.appchat.databinding.ActivityMainBinding
+import com.example.appchat.fragment.MomentsFragment
+import kotlinx.coroutines.Dispatchers
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var webSocket: WebSocket
-    private lateinit var messageInput: EditText
-    private lateinit var sendButton: Button
-    private lateinit var messageList: RecyclerView
-    private lateinit var messageAdapter: MessageAdapter
+    internal lateinit var binding: ActivityMainBinding
     private lateinit var toolbar: Toolbar
-    private var userId: Long = -1L  // 添加userId作为类成员变量
-    private val gson = GsonBuilder()
-        .registerTypeAdapter(LocalDateTime::class.java, LocalDateTimeAdapter())
-        .registerTypeAdapter(MessageType::class.java, object : TypeAdapter<MessageType>() {
-            override fun write(out: JsonWriter, value: MessageType?) {
-                out.value(value?.name)
-            }
-
-            override fun read(input: JsonReader): MessageType {
-                return MessageType.valueOf(input.nextString())
-            }
-        })
-        .create()
-    private var currentChatUserId: Long? = null
-    private var currentUserAdapter: UserAdapter? = null
-    private var contactAdapter: ContactAdapter? = null
-    private var currentChatGroupId: Long? = null
-    private val FILE_PICK_REQUEST = 1
-    private val STORAGE_PERMISSION_REQUEST = 2
-    private val apiService = ApiClient.apiService
-    private var isMultiSelectMode = false
-    private val selectedMessages = mutableSetOf<Long>()
+    private var userId: Long = -1L
     private lateinit var deleteButton: ImageButton
     private var deleteCallback: (() -> Unit)? = null
-
-    private val filePickerLauncher = registerForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { uploadFile(it) }
-    }
-
-    private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        if (permissions.all { it.value }) {
-            println("All permissions granted")
-            showFileChooser()
-        } else {
-            println("Some permissions denied")
-            Toast.makeText(this, "需要存储权限才能选择文件", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private val avatarPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { uploadAvatar(it) }
-    }
-
-    private val avatarRefreshReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == "com.example.appchat.REFRESH_AVATAR") {
-                // 刷新头像
-                val toolbarAvatar = findViewById<ImageView>(R.id.toolbarAvatar)
-                val userId = UserPreferences.getUserId(this@MainActivity)
-                val avatarUrl = "${getString(R.string.server_url_format).format(
-                    getString(R.string.server_ip),
-                    getString(R.string.server_port)
-                )}/api/users/$userId/avatar?t=${System.currentTimeMillis()}"
-
-                Glide.with(this@MainActivity)
-                    .load(avatarUrl)
-                    .apply(RequestOptions.circleCropTransform())
-                    .skipMemoryCache(true)
-                    .diskCacheStrategy(DiskCacheStrategy.NONE)
-                    .placeholder(R.drawable.default_avatar)
-                    .error(R.drawable.default_avatar)
-                    .into(toolbarAvatar)
-            }
-        }
-    }
-
-    private fun WebSocket.sendDebug(message: Any) {
-        val json = gson.toJson(message)
-        println("Sending: $json")
-        this.send(json)
+    private val apiService = ApiClient.apiService
+    private var pendingRequestCount = 0
+    private val pendingRequestCountListener: (Int) -> Unit = { count ->
+        pendingRequestCount = count
+        updateContactsBadge()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // 确保 WebSocket 连接
-        if (!WebSocketManager.isConnected()) {
-            val serverUrl = "http://192.168.31.194:8080/ws"
-            WebSocketManager.init(
-                serverUrl = serverUrl,
-                userId = UserPreferences.getUserId(this)
-            )
-        }
-        
-        setContentView(R.layout.activity_main)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
 
         // 初始化userId
         userId = UserPreferences.getUserId(this)
 
-        // 初始化工具栏相关视图
-        deleteButton = findViewById(R.id.deleteButton)
-        deleteButton.visibility = View.GONE  // 默认隐藏
+        setupToolbar()
+        setupBottomNavigation()
+        setupAvatarRefreshReceiver()
 
-        // 设置 Toolbar
-        val toolbar = findViewById<Toolbar>(R.id.toolbar)
+        // 注册 EventBus
+        EventBus.getDefault().register(this)
+
+        // 确保 WebSocket 连接
+        if (!WebSocketManager.isConnected()) {
+            val serverUrl = ApiClient.BASE_URL
+            WebSocketManager.init(serverUrl, userId)
+        }
+
+        // 注册待处理请求数量监听器
+        WebSocketManager.addPendingRequestCountListener(pendingRequestCountListener)
+        
+        // 注册好友请求监听器，用于实时更新角标
+        WebSocketManager.addFriendRequestListener { request ->
+            if (request.sender != null) {
+                pendingRequestCount++
+                updateContactsBadge()
+            }
+        }
+        
+        // 注册好友请求结果监听器
+        WebSocketManager.addFriendRequestResultListener { _, _ ->
+            pendingRequestCount = maxOf(0, pendingRequestCount - 1)
+            updateContactsBadge()
+        }
+
+        // 初始加载待处理请求数量
+        loadPendingRequests()
+    }
+
+    private fun setupToolbar() {
+        toolbar = findViewById(R.id.toolbar)
         setSupportActionBar(toolbar)
         supportActionBar?.apply {
             setDisplayShowTitleEnabled(true)
@@ -203,10 +156,7 @@ class MainActivity : AppCompatActivity() {
 
         // 加载头像
         val toolbarAvatar = findViewById<ImageView>(R.id.toolbarAvatar)
-        val avatarUrl = "${getString(R.string.server_url_format).format(
-            getString(R.string.server_ip),
-            getString(R.string.server_port)
-        )}/api/users/$userId/avatar?t=${System.currentTimeMillis()}"
+        val avatarUrl = UserPreferences.getAvatarUrl(this)
         
         Glide.with(this)
             .load(avatarUrl)
@@ -221,1055 +171,69 @@ class MainActivity : AppCompatActivity() {
         toolbarAvatar.setOnClickListener {
             startActivity(Intent(this, ProfileActivity::class.java))
         }
+    }
 
-        val bottomNavigation = findViewById<BottomNavigationView>(R.id.bottomNavigation)
-        bottomNavigation.setOnItemSelectedListener { item ->
+    private fun setupBottomNavigation() {
+        binding.bottomNavigation.setOnItemSelectedListener { item ->
             when (item.itemId) {
-                R.id.message_display -> {
-                    supportActionBar?.title = "消息"
+                R.id.navigation_chat -> {
                     loadFragment(MessageDisplayFragment())
                     true
                 }
-                R.id.nav_contacts -> {
-                    supportActionBar?.title = "联系人"
+                R.id.navigation_contacts -> {
                     loadFragment(ContactsFragment())
                     true
                 }
-                R.id.nav_profile -> {
-                    showProfileDialog()
+                R.id.navigation_moments -> {
+                    loadFragment(MomentsFragment())
                     true
+                }
+                R.id.navigation_me -> {
+                    startActivity(Intent(this, ProfileActivity::class.java))
+                    false
                 }
                 else -> false
             }
         }
-        
-        setupViews()
-        
-        // 初始化WebSocket连接
-        val serverUrl = "ws://${getString(R.string.server_ip)}:${getString(R.string.server_port)}/chat"
-        WebSocketManager.init(serverUrl, userId)
 
-        messageAdapter = MessageAdapter(
-            context = this,
-            currentUserId = userId,
-            currentChatType = "group",  // 默认为群聊
-            chatPartnerId = -1L,  // 默认值，表示没有特定聊天对象
-            onMessageDelete = { messageId ->
-                lifecycleScope.launch {
-                    try {
-                        println("🗑️ Starting message deletion process: $messageId")
-                        
-                        // 先从本地删除
-                        messageAdapter.removeMessage(messageId)
-                        println("✅ Local message deletion completed")
-                        
-                        // 然后从服务器删除
-                        val response = apiService.deleteMessage(messageId, userId)
-                        if (response.isSuccessful) {
-                            println("✅ Server message deletion successful")
-                            Toast.makeText(this@MainActivity, "消息已删除", Toast.LENGTH_SHORT).show()
-                        } else {
-                            println("⚠️ Server deletion failed but local deletion succeeded: ${response.code()}")
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                        println("❌ Error in deletion process: ${e.message}")
-                    }
-                }
-            }
-        )
+        // 设置默认选中项
+        binding.bottomNavigation.selectedItemId = R.id.navigation_chat
+    }
 
-        messageList.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity).apply {
-                stackFromEnd = true  // 从底部开始堆叠
-                reverseLayout = false  // 不要反转布局
-            }
-            adapter = messageAdapter
-            
-            adapter?.registerAdapterDataObserver(object : RecyclerView.AdapterDataObserver() {
-                override fun onItemRangeInserted(positionStart: Int, itemCount: Int) {
-                    super.onItemRangeInserted(positionStart, itemCount)
-                    val layoutManager = layoutManager as LinearLayoutManager
-                    val lastVisiblePosition = layoutManager.findLastCompletelyVisibleItemPosition()
-                    if (lastVisiblePosition == -1 || positionStart >= messageAdapter.itemCount - 1 && lastVisiblePosition == positionStart - 1) {
-                        scrollToPosition(messageAdapter.itemCount - 1)
-                    }
-                }
-            })
+    private fun loadFragment(fragment: Fragment) {
+        // 先检查当前显示的是否就是要切换到的 Fragment
+        val currentFragment = supportFragmentManager.findFragmentById(R.id.fragmentContainer)
+        if (currentFragment?.javaClass == fragment.javaClass) {
+            return
         }
 
-        // 注册广播接收器
+        // 使用 replace 而不是 add，并保存到回退栈
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.fragmentContainer, fragment)
+            .commit()
+    }
+
+    private fun setupAvatarRefreshReceiver() {
         val filter = IntentFilter("com.example.appchat.REFRESH_AVATAR")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(avatarRefreshReceiver, filter, RECEIVER_NOT_EXPORTED)
         } else {
             registerReceiver(avatarRefreshReceiver, filter)
         }
-
-        // 添加好友请求监听器
-        WebSocketManager.addFriendRequestListener { friendRequest ->
-            println("📱 Received friend request from ${friendRequest.sender.username}")
-            runOnUiThread {
-                Toast.makeText(
-                    this@MainActivity,
-                    "收到来自 ${friendRequest.sender.username} 的好友请求",
-                    Toast.LENGTH_LONG
-                ).show()
-                showFriendRequestDialog(friendRequest)
-            }
-        }
-
-        // 默认显示消息页面
-        bottomNavigation.selectedItemId = R.id.message_display
-
-        // 注册 EventBus
-        EventBus.getDefault().register(this)
     }
 
-    private fun setupViews() {
-        messageList = findViewById(R.id.messageList)
-    }
-
-    private fun initWebSocket() {
-        val client = OkHttpClient.Builder()
-            .readTimeout(0, TimeUnit.MILLISECONDS)
-            .build()
-
-        val userId = UserPreferences.getUserId(this)
-        val wsUrl = getString(
-            R.string.server_ws_url_format,
-            getString(R.string.server_ip),
-            getString(R.string.server_port)
-        )
-        val request = Request.Builder()
-            .url("$wsUrl?userId=$userId")
-            .build()
-
-        webSocket = client.newWebSocket(request, object : WebSocketListener() {
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                runOnUiThread {
-                    try {
-                        println("⭐ Received WebSocket message: $text")
-                        val wsMessage = gson.fromJson(text, WebSocketMessage::class.java)
-                        println("📝 Parsed message type: ${wsMessage.type}")
-                        when (wsMessage.type) {
-                            "history" -> {
-                                println("📜 Processing history messages")
-                                wsMessage.messages?.forEach { message ->
-                                    messageAdapter.addMessage(message)
-                                }
-                                messageList.scrollToPosition(messageAdapter.itemCount - 1)
-                            }
-                            "message" -> {
-                                wsMessage.message?.let { message ->
-                                    println("💬 Processing new message: $message")
-                                    // 检查消息是否属于当前聊天
-                                    val shouldAdd = when {
-                                        currentChatUserId != null -> {
-                                            message.senderId == currentChatUserId || message.receiverId == currentChatUserId
-                                        }
-                                        currentChatGroupId != null -> {
-                                            message.groupId == currentChatGroupId
-                                        }
-                                        else -> false
-                                    }
-                                    println("✅ Should add message: $shouldAdd (currentChatUserId=$currentChatUserId, currentChatGroupId=$currentChatGroupId)")
-
-                                    if (shouldAdd) {
-                                        println("✅ Adding new message to local database: ${message.id}")
-                                        messageAdapter.addMessage(message)
-                                        messageList.scrollToPosition(messageAdapter.itemCount - 1)
-                                    } else {
-                                        println("⚠️ Message not for current chat, skipping")
-                                    }
-                                }
-                            }
-                            "users" -> {
-                                wsMessage.users?.let { users ->
-                                    println("👥 Processing users message: ${users.map { "${it.username}(${it.isOnline})" }}")
-                                    updateUserList(users)
-                                }
-                            }
-                            "userStatus" -> {
-                                wsMessage.user?.let { user ->
-                                    println("👤 Processing user status message: ${user.username}(online=${user.isOnline})")
-                                    updateUserStatus(user)
-                                }
-                            }
-                            "error" -> {
-                                wsMessage.error?.let { error ->
-                                    println("❌ Received error message: $error")
-                                    Toast.makeText(this@MainActivity, error, Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                            /*"pendingFriendRequests" -> {
-                                println("🤝 Processing pending friend requests message")
-                                wsMessage.requests?.let { requests ->
-                                    println("📬 Found ${requests.size} pending requests")
-                                    requests.forEach { request: FriendRequest ->
-                                        println("📨 Processing request from ${request.sender.username} to ${request.receiver.username}")
-                                        Toast.makeText(
-                                            this@MainActivity,
-                                            "收到来自 ${request.sender.username} 的好友请求",
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                        showFriendRequestDialog(request)
-                                    }
-                                }
-                            }*/
-                            "friendRequest" -> {
-                                wsMessage.friendRequest?.let { request ->
-                                    println("🤝 Received new friend request from ${request.sender.username}")
-                                    Toast.makeText(
-                                        this@MainActivity,
-                                        "收到来自 ${request.sender.username} 的好友请求",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                    showFriendRequestDialog(request)
-                                }
-                            }
-                            "friendRequestSent" -> {
-                                println("✈️ Friend request sent successfully")
-                                Toast.makeText(this@MainActivity, "好友请求已发送", Toast.LENGTH_SHORT).show()
-                            }
-                            "friendRequestResult" -> {
-                                wsMessage.friendRequest?.let { request ->
-                                    println("📫 Received friend request result: ${request.status} from ${request.receiver.username}")
-                                    val message = when (request.status) {
-                                        "ACCEPTED" -> "${request.receiver.username} 接受了你的好友请求"
-                                        "REJECTED" -> "${request.receiver.username} 拒绝了你的好友请求"
-                                        else -> "好友请求状态更新"
-                                    }
-                                    Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                            "groupCreated" -> {
-                                wsMessage.group?.let { group ->
-                                    println("👥 New group created: ${group.name}")
-                                    Toast.makeText(this@MainActivity, "群组 ${group.name} 创建成功", Toast.LENGTH_SHORT).show()
-                                    // 立即显示群组列表对话框
-                                    showGroupListDialog()
-                                }
-                            }
-                            "groupMessage" -> {
-                                wsMessage.message?.let { message ->
-                                    println("👥 Received group message for group ${message.groupId}")
-                                    if (message.groupId == currentChatGroupId) {
-                                        println("✅ Adding group message to current chat")
-                                        messageAdapter.addMessage(message)
-                                        messageList.scrollToPosition(messageAdapter.itemCount - 1)
-                                    } else {
-                                        println("⚠️ Group message not for current chat, skipping")
-                                    }
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                        println("❌ Error processing WebSocket message: ${e.message}")
-                    }
-                }
-            }
-
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
-                runOnUiThread {
-                    Toast.makeText(this@MainActivity, "WebSocket错误: ${t.message}", Toast.LENGTH_SHORT).show()
-                }
-            }
-        })
-    }
-
-    private fun updateUserList(users: List<UserDTO>) {
-        println("Received users update: ${users.map { "${it.username}(online=${it.isOnline})" }}")
-        currentUserAdapter?.updateUsers(users)
-    }
-
-    private fun updateUserStatus(user: UserDTO) {
-        println("Processing user status message: ${user.username}(online=${user.isOnline})")
-        currentUserAdapter?.updateUserStatus(user)
-    }
-
-    /*private fun showContactsDialog() {
-        val contacts = mutableListOf<Contact>()  // 初始化空列表
-        val dialog = Dialog(this)
-        val binding = DialogContactsBinding.inflate(layoutInflater)
-        dialog.setContentView(binding.root)
-
-        val adapter = ContactAdapter(
-            contacts = contacts,
-            onItemClick = { contact ->
-                // 处理点击事件
-                navigateToChat(contact.id, contact.name, contact.avatarUrl)
-            }
-        )
-        binding.contactsList.adapter = adapter
-        // ...其他代码
-    }*/
-
-    /*private fun showSearchDialog() {
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("搜索用户")
-            .create()
-
-        val view = layoutInflater.inflate(R.layout.dialog_search_user, null)
-        val searchInput = view.findViewById<EditText>(R.id.searchInput)
-        val searchResults = view.findViewById<RecyclerView>(R.id.searchResults)
-        val progressBar = view.findViewById<ProgressBar>(R.id.progressBar)
-        val searchButton = view.findViewById<Button>(R.id.searchButton)
-
-        val adapter = SearchUserAdapter(emptyList()) { user ->
-            println("User selected: ${user.username}")
-            webSocket.sendDebug(mapOf(
-                "type" to "FRIEND_REQUEST",
-                "senderId" to UserPreferences.getUserId(this),
-                "receiverId" to user.id
-            ))
-            Toast.makeText(this, "已发送好友请求", Toast.LENGTH_SHORT).show()
-        }
-
-        searchResults.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
-            this.adapter = adapter
-        }
-
-        val performSearch = { keyword: String ->
-            if (keyword.isNotEmpty()) {
-                println("Performing search with keyword: $keyword")
-                progressBar.visibility = View.VISIBLE
-                adapter.updateContacts(emptyList()) // 清空之前的结果
-                apiService.searchUsers(keyword)
-                    .enqueue(object : Callback<List<UserDTO>> {
-                        override fun onResponse(call: Call<List<UserDTO>>, response: Response<List<UserDTO>>) {
-                            progressBar.visibility = View.GONE
-                            if (response.isSuccessful) {
-                                response.body()?.let { users ->
-                                    adapter.updateContacts(users)
-                                }
-                            } else {
-                                Toast.makeText(this@MainActivity, "搜索失败", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-
-                        override fun onFailure(call: Call<List<UserDTO>>, t: Throwable) {
-                            progressBar.visibility = View.GONE
-                            Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
-                        }
-                    })
-            }
-        }
-
-        searchInput.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
-                performSearch(searchInput.text.toString())
-                true
-            } else {
-                false
-            }
-        }
-
-        searchButton.setOnClickListener {
-            performSearch(searchInput.text.toString())
-        }
-
-        dialog.setView(view)
-        dialog.show()
-    }*/
-
-    private fun logout() {
-        UserPreferences.clear(this)
-        webSocket.close(1000, "User logged out")
-        startActivity(Intent(this, LoginActivity::class.java))
-        finish()
-    }
-
-    private fun showFriendRequestDialog(request: FriendRequest) {
-        println("Showing friend request dialog for: ${request.sender.username}")
-        AlertDialog.Builder(this)
-            .setTitle("好友请求")
-            .setMessage("${request.sender.username} 想添加你为好友")
-            .setPositiveButton("接受") { _, _ ->
-                WebSocketManager.handleFriendRequest(request.id, true)
-            }
-            .setNegativeButton("拒绝") { _, _ ->
-                WebSocketManager.handleFriendRequest(request.id, false)
-            }
-            .show()
-    }
-
-    private fun showCreateGroupDialog() {
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("创建群聊")
-            .create()
-
-        val view = layoutInflater.inflate(R.layout.dialog_create_group, null)
-        val groupNameInput = view.findViewById<EditText>(R.id.groupNameInput)
-        val contactsList = view.findViewById<RecyclerView>(R.id.contactsList)
-        val createButton = view.findViewById<Button>(R.id.createButton)
-
-        val adapter = ContactSelectionAdapter(
-            contacts = emptyList(),
-            onContactClick = { selectedUser: UserDTO ->
-                // 处理用户选择
-            }
-        )
-
-        contactsList.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
-            this.adapter = adapter
-        }
-
-        // 加载联系人列表
-        ApiClient.apiService.getUserContacts(UserPreferences.getUserId(this))
-            .enqueue(object : Callback<List<UserDTO>> {
-                override fun onResponse(call: Call<List<UserDTO>>, response: Response<List<UserDTO>>) {
-                    if (response.isSuccessful) {
-                        response.body()?.let { contacts ->
-                            adapter.updateContacts(contacts)
-                        }
-                    }
-                }
-
-                override fun onFailure(call: Call<List<UserDTO>>, t: Throwable) {
-                    Toast.makeText(this@MainActivity, "加载联系人失败", Toast.LENGTH_SHORT).show()
-                }
-            })
-
-        createButton.setOnClickListener {
-            val groupName = groupNameInput.text.toString()
-            if (groupName.isBlank()) {
-                Toast.makeText(this, "请输入群组名称", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-
-            val selectedContacts = adapter.getSelectedContacts()
-            if (selectedContacts.isEmpty()) {
-                Toast.makeText(this, "请选择群组成员", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-
-            val request = CreateGroupRequest(
-                name = groupName,
-                creatorId = UserPreferences.getUserId(this),
-                memberIds = selectedContacts.map { it.id }
-            )
-
-            ApiClient.apiService.createGroup(request)
-                .enqueue(object : Callback<Group> {
-                    override fun onResponse(call: Call<Group>, response: Response<Group>) {
-                        if (response.isSuccessful) {
-                            response.body()?.let { group ->
-                                updateToolbarTitle(group.name)
-                                Toast.makeText(this@MainActivity, "群组创建成功", Toast.LENGTH_SHORT).show()
-                            }
-                            dialog.dismiss()
-                        } else {
-                            Toast.makeText(this@MainActivity, "群组创建失败", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-
-                    override fun onFailure(call: Call<Group>, t: Throwable) {
-                        Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
-                    }
-                })
-        }
-
-        dialog.setView(view)
-        dialog.show()
-    }
-
-    private fun showGroupListDialog() {
-        updateToolbarTitle("群聊")
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("群组")
-            .setView(R.layout.dialog_group_list)
-            .create()
-
-        dialog.show()
-
-        val groupsList = dialog.findViewById<RecyclerView>(R.id.groupsList)
-        val createGroupButton = dialog.findViewById<Button>(R.id.createGroupButton)
-
-        createGroupButton?.setOnClickListener {
-            showCreateGroupDialog()
-            dialog.dismiss()
-        }
-
-        val adapter = GroupAdapter { group ->
-            currentChatGroupId = group.id
-            currentChatUserId = null
-            title = group.name
-            messageAdapter = MessageAdapter(
-                context = this,
-                currentUserId = UserPreferences.getUserId(this),
-                currentChatType = "group",
-                chatPartnerId = group.id,
-                onMessageDelete = { messageId ->
-                    lifecycleScope.launch {
-                        try {
-                            println("🗑️ Starting message deletion process: $messageId")
-
-                            // 先从本地删除
-                            messageAdapter.removeMessage(messageId)
-                            println("✅ Local message deletion completed")
-
-                            // 然后从服务器删除
-                            val response = apiService.deleteMessage(messageId, UserPreferences.getUserId(this@MainActivity))
-                            if (response.isSuccessful) {
-                                println("✅ Server message deletion successful")
-                                Toast.makeText(this@MainActivity, "消息已删除", Toast.LENGTH_SHORT).show()
-                            } else {
-                                println("⚠️ Server deletion failed but local deletion succeeded: ${response.code()}")
-                            }
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                            println("❌ Error in deletion process: ${e.message}")
-                        }
-                    }
-                }
-            )
-            messageList.adapter = messageAdapter
-            loadMessages(type = "GROUP", partnerId = group.id)
-            dialog.dismiss()
-        }
-
-        groupsList?.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
-            this.adapter = adapter
-        }
-
-        // 加载群组列表
-        val userId = UserPreferences.getUserId(this)
-        ApiClient.apiService.getUserGroups(userId).enqueue(object : Callback<List<Group>> {
-            override fun onResponse(call: Call<List<Group>>, response: Response<List<Group>>) {
-                if (response.isSuccessful) {
-                    response.body()?.let { groups ->
-                        adapter.updateGroups(groups)
-                    }
-                }
-            }
-
-            override fun onFailure(call: Call<List<Group>>, t: Throwable) {
-                Toast.makeText(this@MainActivity, "加载群组失败", Toast.LENGTH_SHORT).show()
-            }
-        })
-    }
-
-    private fun sendMessage(content: String) {
-        val message = mutableMapOf(
-            "type" to "CHAT",
-            "senderId" to UserPreferences.getUserId(this),
-            "senderName" to UserPreferences.getUsername(this),
-            "content" to content,
-            "messageType" to "TEXT"
-        )
-
-        // 根据是私聊还是群聊添加不同的字段
-        currentChatGroupId?.let { groupId ->
-            message["groupId"] = groupId
-        }
-        currentChatUserId?.let { userId ->
-            message["receiverId"] to userId
-        }
-
-        webSocket.sendDebug(message)
-        messageInput.text.clear()
-    }
-
-    private fun showGroupSettingsDialog(group: Group) {
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("群组设置")
-            .create()
-
-        val view = layoutInflater.inflate(R.layout.dialog_group_settings, null)
-        val memberList = view.findViewById<RecyclerView>(R.id.memberList)
-        val addMemberButton = view.findViewById<Button>(R.id.addMemberButton)
-
-        val adapter = GroupMemberAdapter(
-            members = group.members.map { member ->
-                UserDTO(
-                    id = member.id,
-                    username = member.username,
-                    nickname = member.nickname,
-                    avatarUrl = member.avatarUrl,
-                    isOnline = member.isOnline
-                )
-            },
-            currentUserId = UserPreferences.getUserId(this),
-            isCreator = group.creator.id == UserPreferences.getUserId(this)
-        ) { user ->
-            if (group.creator.id == UserPreferences.getUserId(this)) {
-                showRemoveMemberConfirmDialog(group.id, user)
-            }
-        }
-
-        memberList.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
-            this.adapter = adapter
-        }
-
-        addMemberButton.setOnClickListener {
-            showAddMemberDialog(group)
-        }
-
-        dialog.setView(view)
-        dialog.show()
-    }
-
-    private fun showRemoveMemberConfirmDialog(groupId: Long, user: UserDTO) {
-        AlertDialog.Builder(this)
-            .setTitle("移除成员")
-            .setMessage("确定要将 ${user.username} 移出群聊吗？")
-            .setPositiveButton("确定") { _, _ ->
-                apiService.removeGroupMember(groupId, user.id)
-                    .enqueue(object : Callback<Group> {
-                        override fun onResponse(call: Call<Group>, response: Response<Group>) {
-                            if (response.isSuccessful) {
-                                Toast.makeText(this@MainActivity, "已移除成员", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(this@MainActivity, "移除成员失败", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-
-                        override fun onFailure(call: Call<Group>, t: Throwable) {
-                            Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
-                        }
-                    })
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    private fun showAddMemberDialog(group: Group) {
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("添加群成员")
-            .create()
-
-        val view = layoutInflater.inflate(R.layout.dialog_add_member, null)
-        val contactsList = view.findViewById<RecyclerView>(R.id.contactsList)
-
-        // 过滤掉已经在群里的联系人
-        apiService.getUserContacts(UserPreferences.getUserId(this))
-            .enqueue(object : Callback<List<UserDTO>> {
-                override fun onResponse(call: Call<List<UserDTO>>, response: Response<List<UserDTO>>) {
-                    if (response.isSuccessful) {
-                        response.body()?.let { contacts ->
-                            val availableContacts = contacts.filter { contact ->
-                                !group.members.any { it.id == contact.id }
-                            }
-
-                            val adapter = ContactSelectionAdapter(availableContacts) { selectedUser ->
-                                apiService.addGroupMember(group.id, selectedUser.id)
-                                    .enqueue(object : Callback<Group> {
-                                        override fun onResponse(call: Call<Group>, response: Response<Group>) {
-                                            if (response.isSuccessful) {
-                                                Toast.makeText(this@MainActivity, "已添加成员", Toast.LENGTH_SHORT).show()
-                                                dialog.dismiss()
-                                            } else {
-                                                Toast.makeText(this@MainActivity, "添加成员失败", Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-
-                                        override fun onFailure(call: Call<Group>, t: Throwable) {
-                                            Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
-                                        }
-                                    })
-                            }
-
-                            contactsList.apply {
-                                layoutManager = LinearLayoutManager(this@MainActivity)
-                                this.adapter = adapter
-                            }
-                        }
-                    }
-                }
-
-                override fun onFailure(call: Call<List<UserDTO>>, t: Throwable) {
-                    Toast.makeText(this@MainActivity, "加载联系人失败", Toast.LENGTH_SHORT).show()
-                    dialog.dismiss()
-                }
-            })
-
-        dialog.setView(view)
-        dialog.show()
-    }
-
-    private fun loadMessages(type: String, partnerId: Long) {
-        lifecycleScope.launch {
-            try {
-                val messages = when (type) {
-                    "GROUP" -> {
-                        println("📥 Loading group messages for group: $partnerId")
-                        ApiClient.apiService.getGroupMessages(
-                            groupId = partnerId,
-                            userId = UserPreferences.getUserId(this@MainActivity)
-                        )
-                    }
-                    else -> {
-                        println("📥 Loading private messages with user: $partnerId")
-                        val currentUserId = UserPreferences.getUserId(this@MainActivity)
-                        ApiClient.apiService.getPrivateMessages(
-                            userId = currentUserId,
-                            otherId = partnerId
-                        )
-                    }
-                }
-                
-                // 更新UI
-                messageAdapter.setMessages(messages)
-                messageList.scrollToPosition(messageAdapter.itemCount - 1)
-                
-            } catch (e: Exception) {
-                e.printStackTrace()
-                println("❌ Error loading messages: ${e.message}")
-                Toast.makeText(this@MainActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
+    private val avatarRefreshReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == "com.example.appchat.REFRESH_AVATAR") {
+                refreshAvatar()
             }
         }
     }
 
-    private fun loadPrivateMessages(userId: Long, otherId: Long) {
-        lifecycleScope.launch {
-            try {
-                val messages = ApiClient.apiService.getPrivateMessages(userId, otherId)
-                messageAdapter.setMessages(messages)
-                messageList.scrollToPosition(messageAdapter.itemCount - 1)
-            } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun loadGroupMessages(groupId: Long) {
-        lifecycleScope.launch {
-            try {
-                val messages = ApiClient.apiService.getGroupMessages(
-                    groupId = groupId,
-                    userId = UserPreferences.getUserId(this@MainActivity)
-                )
-                messageAdapter.setMessages(messages)
-                messageList.scrollToPosition(messageAdapter.itemCount - 1)
-            } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        // 取消注册广播接收器
-        unregisterReceiver(avatarRefreshReceiver)
-        webSocket.close(1000, "Activity destroyed")
-        // 移除好友请求监听器
-        WebSocketManager.removeFriendRequestListeners()
-        // 取消注册 EventBus
-        EventBus.getDefault().unregister(this)
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.main_menu, menu)
-        return true
-    }
-
-    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
-        // 在多选模式下显示删除按钮，隐藏其他按钮
-        menu.findItem(R.id.action_search)?.isVisible = !isMultiSelectMode
-        menu.findItem(R.id.action_more)?.isVisible = !isMultiSelectMode
-        menu.findItem(R.id.action_clear_chat)?.apply {
-            isVisible = isMultiSelectMode
-            setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)  // 在工具栏上直接显示
-            setIcon(R.drawable.ic_delete)  // 设置删除图标
-        }
-        return super.onPrepareOptionsMenu(menu)
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return when (item.itemId) {
-            // 搜索相关
-            R.id.action_search_messages -> {
-                showSearchMessagesDialog()
-                true
-            }
-            R.id.action_search_users -> {
-                showSearchUsersDialog()
-                true
-            }
-
-            // 更多菜单项
-            R.id.menu_profile -> {
-                showProfileDialog()
-                true
-            }
-            R.id.menu_group_chat -> {
-                showCreateGroupDialog()
-                true
-            }
-/*            R.id.menu_contacts -> {
-                showContactsDialog()
-                true
-            }*/
-            R.id.action_clear_chat -> {
-                showDeleteMessagesDialog()
-                true
-            }
-            R.id.action_logout -> {
-                showLogoutConfirmDialog()
-                true
-            }
-            R.id.action_nearby_transfer -> {
-                startActivity(Intent(this, NearbyTransferActivity::class.java))
-                true
-            }
-            else -> super.onOptionsItemSelected(item)
-        }
-    }
-
-    private fun showLogoutConfirmDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("退出登录")
-            .setMessage("确定要退出登录吗？")
-            .setPositiveButton("确定") { _, _ ->
-                logout()
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    fun updateToolbarTitle(title: String) {
-        findViewById<TextView>(R.id.toolbarTitle).text = title
-    }
-
-    private fun showFileChooser() {
-        println("Showing file chooser")
-        if (checkStoragePermission()) {
-            println("Storage permission granted")
-            filePickerLauncher.launch("*/*")
-        } else {
-            println("Requesting storage permission")
-            requestStoragePermission()
-        }
-    }
-
-    private fun checkStoragePermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // Android 13 及以上版本
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.READ_MEDIA_IMAGES
-            ) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.READ_MEDIA_VIDEO
-            ) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.READ_MEDIA_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
-        } else {
-            // Android 12 及以下版本
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.READ_EXTERNAL_STORAGE
-            ) == PackageManager.PERMISSION_GRANTED
-        }
-    }
-
-    private fun requestStoragePermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            requestPermissionLauncher.launch(arrayOf(
-                Manifest.permission.READ_MEDIA_IMAGES,
-                Manifest.permission.READ_MEDIA_VIDEO,
-                Manifest.permission.READ_MEDIA_AUDIO
-            ))
-        } else {
-            requestPermissionLauncher.launch(arrayOf(
-                Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE
-            ))
-        }
-    }
-
-    private fun sendFileMessage(fileDTO: FileDTO) {
-        try {
-            println("⭐ Preparing to send file message: ${fileDTO.filename}")
-            
-            val message = mutableMapOf<String, Any>(
-                "type" to "CHAT",
-                "senderId" to UserPreferences.getUserId(this),
-                "senderName" to UserPreferences.getUsername(this),
-                "content" to fileDTO.filename,
-                "messageType" to "FILE",
-                "fileUrl" to "${getString(R.string.server_url_format).format(
-                    getString(R.string.server_ip),
-                    getString(R.string.server_port)
-                )}${fileDTO.url}"
-            )
-
-            // 添加接收者或群组ID
-            currentChatGroupId?.let { groupId ->
-                message["groupId"] = groupId.toLong()
-                println("✅ Adding groupId: $groupId")
-            } ?: currentChatUserId?.let { userId ->
-                message["receiverId"] = userId.toLong()
-                println("✅ Adding receiverId: $userId")
-            } ?: run {
-                println("❌ No chat target specified")
-                return
-            }
-            
-            println("✅ Sending file message: $message")
-            webSocket.send(gson.toJson(message))
-        } catch (e: Exception) {
-            e.printStackTrace()
-            println("❌ Failed to send file message: ${e.message}")
-            Toast.makeText(this, "发送失败", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun uploadFile(uri: Uri) {
-        println("⭐ Starting file upload")
-        val contentResolver = applicationContext.contentResolver
-        val filename = getFileName(contentResolver, uri)
-        println("✅ File name: $filename")
-        val inputStream = contentResolver.openInputStream(uri)
-        val file = inputStream?.let { createTempFile(it, filename) }
-        
-        if (file != null) {
-            try {
-                val mediaType = contentResolver.getType(uri)?.toMediaTypeOrNull()
-                val requestFile = file.asRequestBody(mediaType)
-                val body = MultipartBody.Part.createFormData("file", filename, requestFile)
-                val userId = UserPreferences.getUserId(this)
-                
-                println("✅ Uploading file: $filename")
-                ApiClient.apiService.uploadFile(body).enqueue(object : Callback<FileDTO> {
-                    override fun onResponse(call: Call<FileDTO>, response: Response<FileDTO>) {
-                        if (response.isSuccessful) {
-                            response.body()?.let { fileDTO ->
-                                println("✅ File uploaded successfully: ${fileDTO.url}")
-                                sendFileMessage(fileDTO)
-                            }
-                        } else {
-                            println("❌ Upload failed: ${response.code()}")
-                            Toast.makeText(this@MainActivity, "文件上传失败", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                    
-                    override fun onFailure(call: Call<FileDTO>, t: Throwable) {
-                        println("❌ Network error: ${t.message}")
-                        Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
-                    }
-                })
-            } catch (e: Exception) {
-                e.printStackTrace()
-                println("❌ Error preparing file upload: ${e.message}")
-                Toast.makeText(this, "文件处理失败", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun getFileName(contentResolver: ContentResolver, uri: Uri): String {
-        val displayName: String? = when (uri.scheme) {
-            "content" -> {
-                val cursor = contentResolver.query(uri, null, null, null, null)
-                cursor?.use {
-                    if (it.moveToFirst()) {
-                        val displayNameIndex = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                        if (displayNameIndex >= 0) {
-                            it.getString(displayNameIndex)
-                        } else null
-                    } else null
-                }
-            }
-            "file" -> uri.lastPathSegment
-            else -> null
-        }
-        return displayName ?: "file"
-    }
-
-    private fun createTempFile(inputStream: InputStream, filename: String): File? {
-        return try {
-            val tempDir = cacheDir
-            val tempFile = File.createTempFile(filename, null, tempDir)
-            tempFile.outputStream().use { outputStream ->
-                inputStream.copyTo(outputStream)
-            }
-            tempFile
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
-    }
-
-    private fun showSearchMessagesDialog() {
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("搜索聊天记录")
-            .create()
-
-        val view = layoutInflater.inflate(R.layout.dialog_search_messages, null)
-        val searchInput = view.findViewById<EditText>(R.id.searchInput)
-        val resultsList = view.findViewById<RecyclerView>(R.id.searchResults)
-        resultsList.layoutManager = LinearLayoutManager(this)
-
-        searchInput.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
-                val query = searchInput.text.toString()
-                searchMessages(query, resultsList) { position ->
-                    dialog.dismiss()
-                    messageList.scrollToPosition(position)
-                    messageAdapter.highlightMessage(position)
-                }
-                true
-            } else {
-                false
-            }
-        }
-
-        dialog.setView(view)
-        dialog.show()
-    }
-
-    private fun searchMessages(query: String, resultsList: RecyclerView, onItemClick: (Int) -> Unit) {
-        // 在当前消息列表中搜索
-        val searchResults = messageAdapter.searchMessages(query)
-        
-        // 创建搜索结果适配器
-        val adapter = SearchResultAdapter(searchResults, onItemClick)
-        
-        resultsList.adapter = adapter
-    }
-
-    private fun showProfileDialog() {
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("个人资料")
-            .create()
-
-        val view = layoutInflater.inflate(R.layout.dialog_profile, null)
-        val avatarImage = view.findViewById<ImageView>(R.id.avatarImage)
-        val nicknameInput = view.findViewById<EditText>(R.id.nicknameInput)
-        val saveButton = view.findViewById<Button>(R.id.saveButton)
-
-        // 加载当前头像和昵称
-        loadCurrentUserProfile(avatarImage, nicknameInput)
-
-        // 点击头像更换
-        avatarImage.setOnClickListener {
-            avatarPickerLauncher.launch("image/*")
-        }
-
-        // 保存按钮
-        saveButton.setOnClickListener {
-            val newNickname = nicknameInput.text.toString()
-            updateUserProfile(newNickname)
-            dialog.dismiss()
-        }
-
-        // 在头像更新成功后，也更新右上角的头像
+    private fun refreshAvatar() {
         val toolbarAvatar = findViewById<ImageView>(R.id.toolbarAvatar)
-        val userId = UserPreferences.getUserId(this)
-        val avatarUrl = "${getString(R.string.server_url_format).format(
-            getString(R.string.server_ip),
-            getString(R.string.server_port)
-        )}/api/users/$userId/avatar?t=${System.currentTimeMillis()}"
-        
+        val avatarUrl = UserPreferences.getAvatarUrl(this)
+
         Glide.with(this)
             .load(avatarUrl)
             .apply(RequestOptions.circleCropTransform())
@@ -1278,164 +242,91 @@ class MainActivity : AppCompatActivity() {
             .placeholder(R.drawable.default_avatar)
             .error(R.drawable.default_avatar)
             .into(toolbarAvatar)
-
-        dialog.setView(view)
-        dialog.show()
     }
 
-    private fun updateUserProfile(nickname: String) {
+    override fun onDestroy() {
+        super.onDestroy()
+        unregisterReceiver(avatarRefreshReceiver)
+        EventBus.getDefault().unregister(this)
+        WebSocketManager.removePendingRequestCountListener(pendingRequestCountListener)
+        // 移除其他监听器
+        WebSocketManager.removeFriendRequestListener { }
+        WebSocketManager.removeFriendRequestResultListener { _, _ -> }
+    }
+
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    fun onSessionUpdate(@Suppress("UNUSED_PARAMETER") event: ChatActivity.SessionUpdateEvent) {
+        // 收到会话更新事件，刷新会话列表
+        loadMessageSessions()
+    }
+
+    private fun loadMessageSessions() {
         val userId = UserPreferences.getUserId(this)
-        val request = UpdateUserRequest(nickname = nickname)
-        
-        apiService.updateUser(userId, request).enqueue(object : Callback<UserDTO> {
-            override fun onResponse(call: Call<UserDTO>, response: Response<UserDTO>) {
-                if (response.isSuccessful) {
-                    Toast.makeText(this@MainActivity, "个人资料更新成功", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(this@MainActivity, "更新失败", Toast.LENGTH_SHORT).show()
-                }
-            }
-
-            override fun onFailure(call: Call<UserDTO>, t: Throwable) {
-                Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
-            }
-        })
-    }
-
-    private fun showDeleteMessagesDialog() {
-        val selectedMessages = messageAdapter.getSelectedMessages()
-        if (selectedMessages.isEmpty()) {
-            Toast.makeText(this, "请选择要删除的消息", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("删除消息")
-            .setMessage("确定要删除选中的 ${selectedMessages.size} 条消息吗？")
-            .setPositiveButton("确定") { _, _ ->
-                deleteSelectedMessages()
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    private fun deleteSelectedMessages() {
         lifecycleScope.launch {
             try {
-                messageAdapter.getSelectedMessages().forEach { messageId ->
-                    val response = apiService.deleteMessage(
-                        messageId, 
-                        UserPreferences.getUserId(this@MainActivity)
-                    )
-                    if (response.isSuccessful) {
-                        response.body()?.let { deleteResponse ->
-                            if (deleteResponse.isFullyDeleted) {
-                                messageAdapter.removeMessageCompletely(messageId)
-                            } else {
-                                messageAdapter.removeMessage(messageId)
-                            }
+                val response = RetrofitClient.messageService.getMessageSessions(userId)
+                if (response.isSuccessful) {
+                    response.body()?.let { sessions ->
+                        // 更新 MessageDisplayFragment 的会话列表
+                        val fragment = supportFragmentManager.findFragmentById(R.id.fragmentContainer)
+                        if (fragment is MessageDisplayFragment) {
+                            // 转换 DTO 到 MessageSession
+                            val messageSessions = sessions.map { it.toMessageSession() }
+                            fragment.updateSessions(messageSessions)
                         }
                     }
                 }
-                exitMultiSelectMode()
-                Toast.makeText(this@MainActivity, "删除成功", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "删除失败", Toast.LENGTH_SHORT).show()
+                Log.e("MainActivity", "Error loading sessions", e)
             }
         }
     }
 
-    fun enterMultiSelectMode() {
-        isMultiSelectMode = true
-        messageAdapter.setMultiSelectMode(true)
-        updateToolbarTitle("已选择 0 条消息")
-        invalidateOptionsMenu()
-    }
-
-    private fun exitMultiSelectMode() {
-        isMultiSelectMode = false
-        selectedMessages.clear()
-        messageAdapter.setMultiSelectMode(false)
-        updateToolbarTitle(getCurrentChatTitle())
-        invalidateOptionsMenu()
-    }
-
-    private fun getCurrentChatTitle(): String {
-        return when {
-            currentChatUserId != null -> "私聊"
-            currentChatGroupId != null -> "群聊"
-            else -> "聊天"
-        }
-    }
-
-    private fun loadCurrentUserProfile(avatarImage: ImageView, nicknameInput: EditText) {
-        val userId = UserPreferences.getUserId(this)
-        
-        // 加载头像
-        val avatarUrl = "${getString(R.string.server_url_format).format(
-            getString(R.string.server_ip),
-            getString(R.string.server_port)
-        )}/api/users/$userId/avatar"
-        
-        Glide.with(this)
-            .load(avatarUrl)
-            .apply(RequestOptions.circleCropTransform())
-            .placeholder(R.drawable.default_avatar)
-            .error(R.drawable.default_avatar)
-            .into(avatarImage)
-
-        // 加载用户信息
-        apiService.getUser(userId).enqueue(object : Callback<UserDTO> {
-            override fun onResponse(call: Call<UserDTO>, response: Response<UserDTO>) {
-                if (response.isSuccessful) {
-                    response.body()?.let { user ->
-                        nicknameInput.setText(user.nickname)
-                    }
-                }
-            }
-
-            override fun onFailure(call: Call<UserDTO>, t: Throwable) {
-                Toast.makeText(this@MainActivity, "加载用户信息失败", Toast.LENGTH_SHORT).show()
-            }
-        })
+    // 添加菜单相关的对话框方法
+    private fun showSearchMessagesDialog() {
+        // TODO: 实现搜索消息对话框
     }
 
     private fun sendFriendRequest(receiverId: Long) {
         try {
-            // 检查 WebSocket 是否已初始化
-            if (WebSocketManager.isConnected()) {
-                val userId = UserPreferences.getUserId(this)
-                val requestJson = JSONObject().apply {
-                    put("type", "FRIEND_REQUEST")
-                    put("senderId", userId)
-                    put("receiverId", receiverId)
-                }
-                
-                WebSocketManager.sendFriendRequest(requestJson.toString(), 
-                    onSuccess = {
-                        runOnUiThread {
-                            Toast.makeText(this, "好友请求已发送", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    onError = { errorMsg ->
-                        runOnUiThread {
-                            Toast.makeText(this, "发送失败: $errorMsg", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                )
-            } else {
-                // WebSocket 未连接，尝试重新连接
-                val serverUrl = ApiClient.BASE_URL  // 使用 ApiClient 中的 BASE_URL
-                val userId = UserPreferences.getUserId(this)
+            val userId = UserPreferences.getUserId(this)
+            val serverUrl = ApiClient.BASE_URL
+            
+            // 如果 WebSocket 未连接，先初始化
+            if (!WebSocketManager.isConnected()) {
                 WebSocketManager.init(serverUrl, userId)
-                
-                // 显示消息并让用户稍后重试
-                Toast.makeText(this, "正在连接服务器，请稍后重试", Toast.LENGTH_SHORT).show()
+                // 等待一会儿确保连接建立
+                Handler(Looper.getMainLooper()).postDelayed({
+                    sendFriendRequestInternal(userId, receiverId)
+                }, 1000)
+            } else {
+                sendFriendRequestInternal(userId, receiverId)
             }
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(this, "发送好友请求失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun sendFriendRequestInternal(userId: Long, receiverId: Long) {
+        val requestJson = JSONObject().apply {
+            put("type", "FRIEND_REQUEST")
+            put("senderId", userId)
+            put("receiverId", receiverId)
+        }.toString()
+        
+        WebSocketManager.sendFriendRequest(requestJson,
+            onSuccess = {
+                runOnUiThread {
+                    Toast.makeText(this, "好友请求已发送", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onError = { errorMsg ->
+                runOnUiThread {
+                    Toast.makeText(this, "发送失败: $errorMsg", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
     }
 
     private fun showSearchUsersDialog() {
@@ -1486,145 +377,102 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    fun startPrivateChat(userId: Long, username: String) {
-        val intent = Intent(this, ChatActivity::class.java).apply {
-            putExtra("chat_type", "PRIVATE")
-            putExtra("receiver_id", userId)
-            putExtra("receiver_name", username)
-        }
-        startActivity(intent)
+    private fun showProfileDialog() {
+        startActivity(Intent(this, ProfileActivity::class.java))
     }
 
-    private fun uploadAvatar(uri: Uri) {
-        val contentResolver = applicationContext.contentResolver
-        val inputStream = contentResolver.openInputStream(uri)
-        val file = inputStream?.let { createTempFile(it, "avatar_temp") }
-
-        if (file != null) {
-            val mediaType = contentResolver.getType(uri)?.toMediaTypeOrNull()
-            val requestFile = file.asRequestBody(mediaType)
-            val body = MultipartBody.Part.createFormData("avatar", "avatar.jpg", requestFile)
-
-            val userId = UserPreferences.getUserId(this)
-            apiService.uploadAvatar(userId, body).enqueue(object : Callback<UserDTO> {
-                override fun onResponse(call: Call<UserDTO>, response: Response<UserDTO>) {
-                    if (response.isSuccessful) {
-                        // 清除缓存并强制从服务器获取新头像
-                        Glide.get(this@MainActivity).clearMemory()
-                        Thread {
-                            Glide.get(this@MainActivity).clearDiskCache()
-                        }.start()
-                        
-                        Handler(Looper.getMainLooper()).post {
-                            val avatarUrl = "${getString(R.string.server_url_format).format(
-                                getString(R.string.server_ip),
-                                getString(R.string.server_port)
-                            )}/api/users/$userId/avatar?t=${System.currentTimeMillis()}"
-                            
-                            val toolbarAvatar = findViewById<ImageView>(R.id.toolbarAvatar)
-                            Glide.with(this@MainActivity)
-                                .load(avatarUrl)
-                                .apply(RequestOptions.circleCropTransform())
-                                .skipMemoryCache(true)
-                                .diskCacheStrategy(DiskCacheStrategy.NONE)
-                                .placeholder(R.drawable.default_avatar)
-                                .error(R.drawable.default_avatar)
-                                .into(toolbarAvatar)
-                            
-                            Toast.makeText(this@MainActivity, "头像更新成功", Toast.LENGTH_SHORT).show()
-                        }
-                    } else {
-                        Toast.makeText(this@MainActivity, "头像更新失败", Toast.LENGTH_SHORT).show()
-                    }
-                }
-
-                override fun onFailure(call: Call<UserDTO>, t: Throwable) {
-                    Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
-                }
-            })
-        }
+    private fun showCreateGroupDialog() {
+        // TODO: 实现创建群聊对话框
     }
 
-    fun updateSelectedCount(count: Int) {
-        if (isMultiSelectMode) {
-            updateToolbarTitle("已选择 $count 条消息")
-            if (count == 0) {
-                exitMultiSelectMode()
+    private fun showDeleteMessagesDialog() {
+        // TODO: 实现删除消息对话框
+    }
+
+    private fun showLogoutConfirmDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("退出登录")
+            .setMessage("确定要退出登录吗？")
+            .setPositiveButton("确定") { _, _ ->
+                UserPreferences.clearUserData(this)
+                startActivity(Intent(this, LoginActivity::class.java))
+                finish()
             }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    // 添加菜单创建方法
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.main_menu, menu)
+        return true
+    }
+
+    // 添加菜单项点击处理
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_search_messages -> {
+                showSearchMessagesDialog()
+                true
+            }
+            R.id.action_search_users -> {
+                showSearchUsersDialog()
+                true
+            }
+            R.id.menu_profile -> {
+                showProfileDialog()
+                true
+            }
+            R.id.menu_group_chat -> {
+                showCreateGroupDialog()
+                true
+            }
+            R.id.action_nearby_transfer -> {
+                startActivity(Intent(this, NearbyTransferActivity::class.java))
+                true
+            }
+            R.id.action_logout -> {
+                showLogoutConfirmDialog()
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
         }
     }
 
-    // 添加返回键处理
     override fun onBackPressed() {
-        if (isMultiSelectMode) {
-            exitMultiSelectMode()
+        // 如果不是在聊天页面，就切换到聊天页面
+        if (binding.bottomNavigation.selectedItemId != R.id.navigation_chat) {
+            binding.bottomNavigation.selectedItemId = R.id.navigation_chat
         } else {
             super.onBackPressed()
         }
     }
 
-    fun showMultiSelectActionBar() {
-        // 显示多选模式的工具栏
-        supportActionBar?.apply {
-            setDisplayHomeAsUpEnabled(true)
-            title = "选择要删除的消息"
-        }
-        
-        // 隐藏普通工具栏内容，显示删除按钮
-        findViewById<LinearLayout>(R.id.toolbarContent).visibility = View.GONE
-        deleteButton.visibility = View.VISIBLE
-    }
-
-    fun hideMultiSelectActionBar() {
-        // 隐藏多选模式的工具栏
-        supportActionBar?.apply {
-            setDisplayHomeAsUpEnabled(false)
-            title = "聊天"
-        }
-        
-        // 显示普通工具栏内容，隐藏删除按钮
-        findViewById<LinearLayout>(R.id.toolbarContent).visibility = View.VISIBLE
-        deleteButton.visibility = View.GONE
-    }
-
-    fun showDeleteButton(callback: () -> Unit) {
-        deleteButton.visibility = View.VISIBLE
-        deleteCallback = callback
-        deleteButton.setOnClickListener {
-            deleteCallback?.invoke()
+    private fun updateContactsBadge() {
+        val badge = binding.bottomNavigation.getOrCreateBadge(R.id.navigation_contacts)
+        if (pendingRequestCount > 0) {
+            badge.apply {
+                isVisible = true
+                backgroundColor = ContextCompat.getColor(this@MainActivity, R.color.red)
+                number = pendingRequestCount
+            }
+        } else {
+            badge.isVisible = false
         }
     }
 
-    private fun loadFragment(fragment: Fragment) {
-        supportFragmentManager.beginTransaction()
-            .replace(R.id.fragmentContainer, fragment)
-            .commit()
-    }
-
-    @Subscribe(threadMode = ThreadMode.MAIN)
-    fun onSessionUpdate(event: ChatActivity.SessionUpdateEvent) {
-        // 收到会话更新事件，刷新会话列表
-        loadMessageSessions()
-    }
-
-    private fun loadMessageSessions() {
-        val userId = UserPreferences.getUserId(this)
+    fun loadPendingRequests() {
         lifecycleScope.launch {
             try {
-                val response = RetrofitClient.messageService.getMessageSessions(userId)
+                val response = ApiClient.apiService.getPendingRequests(userId)
                 if (response.isSuccessful) {
-                    response.body()?.let { sessions ->
-                        // 更新 MessageDisplayFragment 的会话列表
-                        val fragment = supportFragmentManager.findFragmentById(R.id.fragmentContainer)
-                        if (fragment is MessageDisplayFragment) {
-                            // 转换 DTO 到 MessageSession
-                            val messageSessions = sessions.map { it.toMessageSession() }
-                            fragment.updateSessions(messageSessions)
-                        }
+                    response.body()?.let { requests ->
+                        pendingRequestCount = requests.size
+                        updateContactsBadge()
                     }
                 }
             } catch (e: Exception) {
-                Log.e("MainActivity", "Error loading sessions", e)
+                Log.e("MainActivity", "Error loading pending requests", e)
             }
         }
     }

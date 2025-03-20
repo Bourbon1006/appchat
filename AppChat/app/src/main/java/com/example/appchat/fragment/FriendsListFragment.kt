@@ -39,12 +39,12 @@ class FriendsListFragment : Fragment() {
         savedInstanceState: Bundle?
     ): View {
         _binding = FragmentFriendsListBinding.inflate(inflater, container, false)
+        setupRecyclerView()
+        loadFriends()
         return binding.root
     }
 
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-
+    private fun setupRecyclerView() {
         adapter = ContactAdapter(
             contacts = contacts,
             onItemClick = { contact ->
@@ -53,7 +53,10 @@ class FriendsListFragment : Fragment() {
         )
         binding.contactsList.adapter = adapter
         binding.contactsList.layoutManager = LinearLayoutManager(context)
+    }
 
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
         loadContacts()
     }
 
@@ -130,6 +133,35 @@ class FriendsListFragment : Fragment() {
             } catch (e: Exception) {
                 Toast.makeText(context, "删除失败: ${e.message}", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    private fun loadFriends() {
+        lifecycleScope.launch {
+            try {
+                val userId = UserPreferences.getUserId(requireContext())
+                val response = ApiClient.apiService.getFriends(userId)
+                if (response.isSuccessful) {
+                    contacts.clear()
+                    contacts.addAll(response.body()?.map { user ->
+                        Contact(
+                            id = user.id,
+                            name = user.nickname ?: user.username,
+                            avatarUrl = user.avatarUrl ?: "",
+                            isOnline = user.isOnline
+                        )
+                    } ?: emptyList())
+                    adapter.notifyDataSetChanged()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(requireContext(), "加载好友列表失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun refreshFriendsList() {
+        if (isAdded) {
+            loadFriends()
         }
     }
 } 

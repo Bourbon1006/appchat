@@ -209,7 +209,14 @@ class MessageService(
             messageRepository.save(message)
 
             // 如果删除的是最后一条消息，更新会话的最后一条消息
-            updateLastMessageIfNeeded(message, userId)
+            val otherId = if (message.group != null) {
+                message.group!!.id
+            } else {
+                if (message.sender.id == userId) message.receiver?.id ?: 0L
+                else message.sender.id
+            }
+            
+            updateLastMessageIfNeeded(message, userId, otherId)
 
             false
         } catch (e: Exception) {
@@ -219,7 +226,7 @@ class MessageService(
         }
     }
 
-    private fun updateLastMessageIfNeeded(deletedMessage: Message, userId: Long) {
+    private fun updateLastMessageIfNeeded(deletedMessage: Message, userId: Long, otherId: Long) {
         try {
             // 获取会话的最后一条消息
             val lastMessage = if (deletedMessage.group != null) {
@@ -232,8 +239,7 @@ class MessageService(
                 // 私聊消息
                 messageRepository.findLastPrivateMessage(
                     userId,
-                    deletedMessage.sender.id,
-                    deletedMessage.receiver?.id ?: 0L
+                    otherId
                 )
             }
 
@@ -248,8 +254,7 @@ class MessageService(
                 } else {
                     messageRepository.findSecondLastPrivateMessage(
                         userId,
-                        deletedMessage.sender.id,
-                        deletedMessage.receiver?.id ?: 0L
+                        otherId
                     )
                 }
                 

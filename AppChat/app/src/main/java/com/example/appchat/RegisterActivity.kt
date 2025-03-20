@@ -11,10 +11,12 @@ import androidx.appcompat.app.AppCompatActivity
 import com.example.appchat.api.ApiClient
 import com.example.appchat.model.AuthResponse
 import com.example.appchat.model.RegisterRequest
+import com.example.appchat.model.UserDTO
 import com.example.appchat.util.UserPreferences
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
+import org.json.JSONObject
 
 class RegisterActivity : AppCompatActivity() {
     private lateinit var usernameInput: EditText
@@ -56,35 +58,45 @@ class RegisterActivity : AppCompatActivity() {
     }
 
     private fun performRegister(username: String, password: String) {
-        val request = RegisterRequest(username, password)
+        val request = RegisterRequest(
+            username = username,
+            password = password
+        )
+        
         ApiClient.apiService.register(request).enqueue(object : Callback<AuthResponse> {
             override fun onResponse(call: Call<AuthResponse>, response: Response<AuthResponse>) {
                 progressBar.visibility = View.GONE
                 registerButton.isEnabled = true
-
+                
                 if (response.isSuccessful) {
                     response.body()?.let { authResponse ->
                         // 保存用户信息
-                        UserPreferences.saveUserInfo(
-                            context = this@RegisterActivity,
-                            userId = authResponse.userId,
-                            username = authResponse.username,
-                            token = authResponse.token
+                        UserPreferences.saveUserData(
+                            this@RegisterActivity,
+                            authResponse.userId,
+                            authResponse.token,
+                            authResponse.username
                         )
-
-                        Toast.makeText(this@RegisterActivity, "注册成功", Toast.LENGTH_SHORT).show()
-                        startActivity(Intent(this@RegisterActivity, MainActivity::class.java))
-                        finish()
                     }
+                    Toast.makeText(this@RegisterActivity, "注册成功", Toast.LENGTH_SHORT).show()
+                    finish()
                 } else {
-                    Toast.makeText(this@RegisterActivity, "注册失败", Toast.LENGTH_SHORT).show()
+                    try {
+                        // 解析错误信息
+                        val errorBody = response.errorBody()?.string()
+                        val errorJson = JSONObject(errorBody ?: "")
+                        val errorMessage = errorJson.optString("message", "注册失败")
+                        Toast.makeText(this@RegisterActivity, errorMessage, Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(this@RegisterActivity, "注册失败", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
 
             override fun onFailure(call: Call<AuthResponse>, t: Throwable) {
                 progressBar.visibility = View.GONE
                 registerButton.isEnabled = true
-                Toast.makeText(this@RegisterActivity, "网络错误", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@RegisterActivity, "网络错误: ${t.message}", Toast.LENGTH_SHORT).show()
             }
         })
     }

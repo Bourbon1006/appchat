@@ -94,9 +94,7 @@ interface ApiService {
 
     @Multipart
     @POST("api/files/upload")
-    fun uploadFile(
-        @Part file: MultipartBody.Part
-    ): Call<FileDTO>
+    suspend fun uploadFile(@Part file: MultipartBody.Part): Response<FileUploadResponse>
 
     @DELETE("api/messages/{messageId}")
     suspend fun deleteMessage(
@@ -109,6 +107,9 @@ interface ApiService {
         @Query("userId") userId: Long,
         @Query("otherId") otherId: Long
     ): Response<Unit>
+
+    @DELETE("messages/batch")
+    suspend fun deleteMessages(@Query("messageIds") messageIds: List<Long>): Response<Unit>
 
     @Multipart
     @POST("api/users/{userId}/avatar")
@@ -170,8 +171,63 @@ interface ApiService {
 
     @GET("api/users/{userId}/contacts")
     suspend fun getFriends(@Path("userId") userId: Long): Response<List<UserDTO>>
+
+    @GET("api/moments/friends")
+    suspend fun getFriendMoments(@Query("userId") userId: Long): List<Moment>
+
+    @GET("api/moments/user/{userId}")
+    suspend fun getUserMoments(@Path("userId") userId: Long): List<Moment>
+
+    @POST("api/moments/{momentId}/like")
+    suspend fun likeMoment(
+        @Path("momentId") momentId: Long,
+        @Query("userId") userId: Long
+    )
+
+    @DELETE("api/moments/{momentId}/like")
+    suspend fun unlikeMoment(
+        @Path("momentId") momentId: Long,
+        @Query("userId") userId: Long
+    )
+
+    @POST("api/moments/{momentId}/comments")
+    suspend fun addComment(
+        @Path("momentId") momentId: Long,
+        @Query("userId") userId: Long,
+        @Body request: CreateCommentRequest
+    ): MomentComment
+
+    @POST("api/moments")
+    suspend fun createMoment(
+        @Query("userId") userId: Long,
+        @Body request: CreateMomentRequest
+    ): Response<Moment>
+
+    @DELETE("api/moments/{momentId}")
+    suspend fun deleteMoment(
+        @Path("momentId") momentId: Long,
+        @Query("userId") userId: Long
+    )
+
+    @POST("api/friends/handle")
+    suspend fun handleFriendRequest(
+        @Query("requestId") requestId: Long,
+        @Query("accept") accept: Boolean
+    ): Response<Unit>
+
+    @GET("api/friends/pending/{userId}")
+    suspend fun getPendingRequests(@Path("userId") userId: Long): Response<List<FriendRequest>>
 }
 
 data class DeleteMessageResponse(
     val isFullyDeleted: Boolean  // 表示消息是否已被所有相关用户删除
+)
+
+data class CreateMomentRequest(
+    val content: String,
+    val imageUrl: String?
+)
+
+data class CreateCommentRequest(
+    val content: String
 )

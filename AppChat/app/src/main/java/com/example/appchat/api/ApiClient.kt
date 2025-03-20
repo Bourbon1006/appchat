@@ -10,6 +10,13 @@ import com.google.gson.GsonBuilder
 import java.time.LocalDateTime
 
 object ApiClient {
+    lateinit var context: Context
+        private set
+
+    fun init(context: Context) {
+        this.context = context.applicationContext
+    }
+
     const val BASE_URL = "http://192.168.31.194:8080/"
 
     private val gson = GsonBuilder()

@@ -30,4 +30,44 @@
         android:layout_height="0dp"
         android:layout_weight="1" />
 
+    <!-- 好友请求入口 -->
+    <LinearLayout
+        android:id="@+id/friendRequestSection"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="16dp"
+        android:background="?attr/selectableItemBackground"
+        android:clickable="true"
+        android:focusable="true">
+        
+        <ImageView
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_friend_request"/>
+            
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="16dp"
+            android:text="好友请求"/>
+            
+        <TextView
+            android:id="@+id/friendRequestBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="20dp"
+            android:gravity="center"
+            android:textColor="@color/white"
+            android:background="@drawable/badge_background"
+            android:visibility="gone"/>
+    </LinearLayout>
+    
+    <!-- 现有的联系人列表 -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/contactsList"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
+
 </LinearLayout>

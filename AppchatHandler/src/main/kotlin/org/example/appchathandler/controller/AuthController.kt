@@ -2,6 +2,8 @@ package org.example.appchathandler.controller
 
 import org.example.appchathandler.service.AuthService
 import org.springframework.http.ResponseEntity
+import org.springframework.http.HttpStatus
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.web.bind.annotation.*
 
 @RestController
@@ -15,8 +17,7 @@ class AuthController(private val authService: AuthService) {
 
     data class RegisterRequest(
         val username: String = "",
-        val password: String = "",
-        val email: String = ""
+        val password: String = ""
     )
 
     @PostMapping("/login")
@@ -26,8 +27,22 @@ class AuthController(private val authService: AuthService) {
     }
 
     @PostMapping("/register")
-    fun register(@RequestBody request: RegisterRequest): ResponseEntity<Map<String, Any>> {
-        val response = authService.register(request.username, request.password, request.email)
-        return ResponseEntity.ok(response)
+    fun register(@RequestBody request: RegisterRequest): ResponseEntity<Any> {
+        return try {
+            val user = authService.register(
+                username = request.username,
+                password = request.password
+            )
+            ResponseEntity.ok(user)
+        } catch (e: DataIntegrityViolationException) {
+            // 用户名重复的情况
+            ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(mapOf("message" to "用户名已存在"))
+        } catch (e: Exception) {
+            ResponseEntity
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(mapOf("message" to "注册失败: ${e.message}"))
+        }
     }
 } 
