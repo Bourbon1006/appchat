@@ -8,7 +8,7 @@ import org.springframework.stereotype.Repository
 interface UserRepository : JpaRepository<User, Long> {
     fun findByUsername(username: String): User?
     
-    fun findByIsOnlineTrue(): List<User>
+    fun findByOnlineStatus(status: Int): List<User>
 
     fun findByUsernameContainingIgnoreCase(keyword: String): List<User>
 } 

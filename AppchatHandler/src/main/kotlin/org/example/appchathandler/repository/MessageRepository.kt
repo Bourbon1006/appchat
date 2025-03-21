@@ -397,4 +397,45 @@ interface MessageRepository : JpaRepository<Message, Long> {
         @Param("userId") userId: Long,
         @Param("otherId") otherId: Long
     ): Message?
+
+    @Query("SELECT m FROM Message m WHERE m.receiver.id = :userId AND m.id NOT IN (SELECT rs.message.id FROM MessageReadStatus rs WHERE rs.userId = :userId)")
+    fun findUnreadMessages(userId: Long, partnerId: Long): List<Message>
+
+    @Query("""
+        SELECT COUNT(m) FROM Message m 
+        WHERE m.receiver.id = :userId 
+        AND m.sender.id = :partnerId
+        AND m.id NOT IN (
+            SELECT rs.message.id FROM MessageReadStatus rs 
+            WHERE rs.userId = :userId
+        )
+    """)
+    fun countUnreadMessages(userId: Long, partnerId: Long): Int
+
+    @Query("SELECT COUNT(rs) > 0 FROM MessageReadStatus rs WHERE rs.message.id = :messageId AND rs.userId = :userId")
+    fun existsByMessageIdAndUserId(messageId: Long, userId: Long): Boolean
+
+    @Modifying
+    @Query("DELETE FROM MessageReadStatus rs WHERE rs.message.id = :messageId")
+    fun deleteAllReadStatusesForMessage(messageId: Long)
+
+    @Query("""
+        SELECT m FROM Message m
+        WHERE m.sender.id = :senderId AND m.receiver.id = :receiverId
+        AND m.id NOT IN (
+            SELECT mrs.message.id FROM MessageReadStatus mrs WHERE mrs.userId = :receiverId
+        )
+    """)
+    fun findUnreadMessagesFromUser(senderId: Long, receiverId: Long): List<Message>
+
+    @Query("""
+        SELECT COUNT(m) FROM Message m 
+        WHERE m.group.id = :groupId
+        AND m.sender.id <> :userId
+        AND m.id NOT IN (
+            SELECT rs.message.id FROM MessageReadStatus rs 
+            WHERE rs.userId = :userId
+        )
+    """)
+    fun countUnreadGroupMessages(userId: Long, groupId: Long): Int
 }

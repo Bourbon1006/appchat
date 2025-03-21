@@ -89,6 +89,7 @@ import android.util.Log
 import com.example.appchat.databinding.ActivityMainBinding
 import com.example.appchat.fragment.MomentsFragment
 import kotlinx.coroutines.Dispatchers
+import com.example.appchat.fragment.MeFragment
 
 class MainActivity : AppCompatActivity() {
     internal lateinit var binding: ActivityMainBinding
@@ -189,8 +190,8 @@ class MainActivity : AppCompatActivity() {
                     true
                 }
                 R.id.navigation_me -> {
-                    startActivity(Intent(this, ProfileActivity::class.java))
-                    false
+                    loadFragment(MeFragment())
+                    true
                 }
                 else -> false
             }

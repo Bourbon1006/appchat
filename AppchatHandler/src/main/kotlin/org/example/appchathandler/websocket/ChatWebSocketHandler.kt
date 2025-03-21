@@ -25,6 +25,10 @@ import com.fasterxml.jackson.core.type.TypeReference
 import org.example.appchathandler.entity.*
 import org.example.appchathandler.event.SessionUpdateEvent
 import org.example.appchathandler.service.FriendService
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+import org.example.appchathandler.event.UserStatusUpdateEvent
+import org.example.appchathandler.event.FriendRequestNotificationEvent
 
 @Component
 class ChatWebSocketHandler(
@@ -41,6 +45,7 @@ class ChatWebSocketHandler(
         val username: String,
         val nickname: String?,
         val avatarUrl: String?,
+        val onlineStatus: Int,
         val isOnline: Boolean
     )
 
@@ -54,6 +59,7 @@ class ChatWebSocketHandler(
 
     private val sessions = ConcurrentHashMap<Long, WebSocketSession>()
     private val sessionLocks = ConcurrentHashMap<Long, Any>()
+    private val logger = LoggerFactory.getLogger(ChatWebSocketHandler::class.java)
 
     private fun JsonNode.asLongOrNull(): Long? {
         return if (this.isNull) null else this.asLong()
@@ -67,7 +73,7 @@ class ChatWebSocketHandler(
                 val user = userService.getUser(userId)
                 
                 // 设置用户在线状态
-                userService.setUserOnline(userId, true)
+                userService.setUserOnline(userId, 1)  // 1 表示在线
                 
                 // 保存会话
                 sessions[userId] = session
@@ -100,7 +106,8 @@ class ChatWebSocketHandler(
                             username = onlineUser.username,
                             nickname = onlineUser.nickname,
                             avatarUrl = onlineUser.avatarUrl,
-                            isOnline = true
+                            onlineStatus = onlineUser.onlineStatus,
+                            isOnline = onlineUser.onlineStatus > 0
                         )
                     }
                 
@@ -116,7 +123,8 @@ class ChatWebSocketHandler(
                     "username" to user.username,
                     "nickname" to user.nickname,
                     "avatarUrl" to user.avatarUrl,
-                    "isOnline" to user.isOnline
+                    "onlineStatus" to user.onlineStatus,
+                    "isOnline" to (user.onlineStatus > 0)
                 )
                 sessions.values.forEach { s ->
                     if (s != session) {
@@ -374,8 +382,9 @@ class ChatWebSocketHandler(
         val userId = session.uri?.query?.substringAfter("userId=")?.toLongOrNull()
         if (userId != null) {
             sessions.remove(userId)
-            sessionLocks.remove(userId)  // 清理锁对象
-            userService.setUserOnline(userId, false)
+            sessionLocks.remove(userId)
+            userService.setUserOnline(userId, 0)  // 0 表示离线
+            
             // 广播用户下线通知
             val user = userService.getUser(userId)
             val offlineStatus = UserStatusDTO(
@@ -383,13 +392,19 @@ class ChatWebSocketHandler(
                 username = user.username,
                 nickname = user.nickname,
                 avatarUrl = user.avatarUrl,
+                onlineStatus = 0,
                 isOnline = false
             )
             val statusJson = objectMapper.writeValueAsString(mapOf(
                 "type" to "userStatus",
                 "user" to offlineStatus
             ))
-            sessions.values.forEach { it.sendMessage(TextMessage(statusJson)) }
+            
+            sessions.values.forEach { s ->
+                if (s.isOpen) {
+                    s.sendMessage(TextMessage(statusJson))
+                }
+            }
         }
     }
 
@@ -550,6 +565,51 @@ class ChatWebSocketHandler(
             }
         } else {
             println("⚠️ 发送者 ${request.sender.username} 不在线")
+        }
+    }
+
+    @EventListener
+    fun handleUserStatusUpdate(event: UserStatusUpdateEvent) {
+        val user = userService.getUser(event.userId)
+        val message = mapOf<String, Any>(
+            "type" to "STATUS_CHANGED",
+            "data" to mapOf(
+                "userId" to event.userId,
+                "status" to event.status
+            )
+        )
+        
+        // 通知所有在线用户
+        sessions.values.forEach { session ->
+            if (session.isOpen) {
+                try {
+                    session.sendMessage(TextMessage(objectMapper.writeValueAsString(message)))
+                } catch (e: Exception) {
+                    logger.error("Failed to send status update", e)
+                }
+            }
+        }
+    }
+
+    @EventListener
+    fun handleFriendRequestNotification(event: FriendRequestNotificationEvent) {
+        val request = event.friendRequest
+        val receiverId = request.receiver.id
+        
+        val session = sessions[receiverId]
+        if (session != null && session.isOpen) {
+            try {
+                val message = mapOf(
+                    "type" to "FRIEND_REQUEST",
+                    "senderId" to request.sender.id,
+                    "senderName" to request.sender.username,
+                    "message" to "${request.sender.username} 请求添加您为好友",
+                    "requestId" to request.id
+                )
+                session.sendMessage(TextMessage(objectMapper.writeValueAsString(message)))
+            } catch (e: Exception) {
+                logger.error("Failed to send friend request notification", e)
+            }
         }
     }
 }

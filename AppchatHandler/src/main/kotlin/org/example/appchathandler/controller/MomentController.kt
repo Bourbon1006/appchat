@@ -3,6 +3,7 @@ package org.example.appchathandler.controller
 import org.example.appchathandler.dto.MomentDTO
 import org.example.appchathandler.dto.MomentCommentDTO
 import org.example.appchathandler.service.MomentService
+import org.example.appchathandler.service.UserService
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.transaction.annotation.Transactional
@@ -10,7 +11,7 @@ import org.springframework.web.bind.annotation.*
 
 @RestController
 @RequestMapping("/api/moments")
-class MomentController(private val momentService: MomentService) {
+class MomentController(private val momentService: MomentService, private val userService: UserService) {
 
     data class CreateMomentRequest(
         val content: String,

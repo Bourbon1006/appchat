@@ -39,6 +39,7 @@ class WebSocketManager {
         private var messageDisplayFragment: MessageDisplayFragment? = null
         private val friendDeletedListeners = CopyOnWriteArrayList<(Long) -> Unit>()
         private var isConnected = false
+        private var onlineStatusListener: ((Long, Int) -> Unit)? = null
 
         data class WebSocketResponse(
             val type: String,
@@ -306,6 +307,11 @@ class WebSocketManager {
                             friendRequestResultListeners.forEach { it(requestId, accepted) }
                         }
                     }
+                    "ONLINE_STATUS" -> {
+                        val userId = jsonObject.getLong("userId")
+                        val status = jsonObject.getInt("status")
+                        onlineStatusListener?.invoke(userId, status)
+                    }
                     // 尝试解析为 WebSocketResponse
                     else -> {
                         val response = gson.fromJson(text, WebSocketResponse::class.java)
@@ -468,6 +474,14 @@ class WebSocketManager {
 
         fun removePendingRequestCountListener(listener: (Int) -> Unit) {
             pendingRequestCountListeners.remove(listener)
+        }
+
+        fun addOnlineStatusListener(listener: (Long, Int) -> Unit) {
+            onlineStatusListener = listener
+        }
+
+        fun removeOnlineStatusListener() {
+            onlineStatusListener = null
         }
     }
 }

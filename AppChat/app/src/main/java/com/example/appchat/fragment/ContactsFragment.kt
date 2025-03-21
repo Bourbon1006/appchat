@@ -20,6 +20,7 @@ import com.example.appchat.MainActivity
 import com.example.appchat.R
 import com.example.appchat.adapter.ContactAdapter
 import com.example.appchat.api.ApiClient
+import com.example.appchat.model.Contact
 import com.example.appchat.model.UserDTO
 import com.example.appchat.model.FriendRequest
 import com.example.appchat.util.UserPreferences
@@ -39,6 +40,11 @@ class ContactsFragment : Fragment() {
     private lateinit var tabLayout: TabLayout
     private lateinit var binding: FragmentContactsBinding
     private var pendingRequestCount = 0
+    
+    // 添加联系人适配器
+    private lateinit var contactsRecyclerView: RecyclerView
+    private lateinit var contactAdapter: ContactAdapter
+    private val contacts = mutableListOf<Contact>()
 
     // 添加待处理请求数量监听器
     private val pendingRequestCountListener: (Int) -> Unit = { count ->
@@ -73,6 +79,80 @@ class ContactsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         loadPendingRequests()
+        
+        // 设置联系人列表
+        setupContactsList()
+        
+        // 加载联系人列表
+        loadContacts()
+        
+        // 注册 WebSocket 监听器，接收联系人状态更新
+        WebSocketManager.addOnlineStatusListener { userId, status ->
+            // 在联系人列表中查找对应的联系人，并更新其状态
+            val updatedContacts = contacts.map { contact ->
+                if (contact.id == userId) {
+                    contact.copy(onlineStatus = status)
+                } else {
+                    contact
+                }
+            }
+            
+            // 更新适配器
+            activity?.runOnUiThread {
+                contacts.clear()
+                contacts.addAll(updatedContacts)
+                contactAdapter.notifyDataSetChanged()
+            }
+        }
+    }
+    
+    private fun setupContactsList() {
+        contactsRecyclerView = binding.contactsRecyclerView ?: return
+        contactAdapter = ContactAdapter(contacts) { contact ->
+            // 处理联系人点击事件
+            val intent = Intent(requireContext(), ChatActivity::class.java).apply {
+                putExtra("chat_type", "PRIVATE")
+                putExtra("receiver_id", contact.id)
+                putExtra("receiver_name", contact.nickname ?: contact.username)
+            }
+            startActivity(intent)
+        }
+        
+        contactsRecyclerView.apply {
+            layoutManager = LinearLayoutManager(requireContext())
+            adapter = contactAdapter
+        }
+    }
+    
+    private fun loadContacts() {
+        val userId = UserPreferences.getUserId(requireContext())
+        
+        lifecycleScope.launch {
+            try {
+                val response = ApiClient.apiService.getFriends(userId)
+                if (response.isSuccessful) {
+                    response.body()?.let { userList ->
+                        // 将 UserDTO 转换为 Contact
+                        val contactList = userList.map { user ->
+                            Contact(
+                                id = user.id,
+                                username = user.username,
+                                nickname = user.nickname,
+                                avatarUrl = user.avatarUrl,
+                                onlineStatus = user.onlineStatus ?: 0
+                            )
+                        }
+                        contacts.clear()
+                        contacts.addAll(contactList)
+                        contactAdapter.notifyDataSetChanged()
+                    }
+                } else {
+                    Toast.makeText(requireContext(), "加载联系人失败", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(requireContext(), "网络错误", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun setupViewPager() {
@@ -158,6 +238,9 @@ class ContactsFragment : Fragment() {
         // 移除监听器
         WebSocketManager.removeFriendRequestListener(friendRequestListener)
         WebSocketManager.removeFriendRequestResultListener(friendRequestResultListener)
+        
+        // 移除 WebSocket 监听器
+        WebSocketManager.removeOnlineStatusListener()
     }
 
     override fun onDestroy() {
@@ -176,6 +259,7 @@ class ContactsFragment : Fragment() {
         WebSocketManager.addFriendRequestResultListener(friendRequestResultListener)
         // 每次恢复时都重新加载一次
         loadPendingRequests()
+        loadContacts()  // 也重新加载联系人列表
     }
 
     override fun onPause() {
@@ -202,13 +286,12 @@ class ContactsFragment : Fragment() {
                 updateFriendRequestBadge()
                 
                 if (accepted) {
-                    (childFragmentManager.findFragmentByTag("f${viewPager.currentItem}") as? FriendsListFragment)?.refreshFriendsList()
+                    loadContacts()  // 如果接受了好友请求，重新加载联系人列表
                 }
             }
         }
     }
 }
-
 class ContactsPagerAdapter(fragment: Fragment) : FragmentStateAdapter(fragment) {
     override fun getItemCount(): Int = 2
 

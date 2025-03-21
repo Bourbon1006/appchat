@@ -9,37 +9,28 @@ import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.SignatureAlgorithm
 import java.util.*
 import org.springframework.security.crypto.bcrypt.BCrypt
+import org.springframework.security.crypto.password.PasswordEncoder
 
 @Service
-class AuthService(private val userRepository: UserRepository) {
+class AuthService(
+    private val userRepository: UserRepository,
+    private val passwordEncoder: PasswordEncoder
+) {
     
-    fun register(username: String, password: String): Map<String, Any> {
-        // 检查用户名是否已存在
-        if (userRepository.findByUsername(username) != null) {
-            throw RuntimeException("用户名已存在")
+    fun register(request: RegisterRequest): User {
+        if (userRepository.findByUsername(request.username) != null) {
+            throw IllegalArgumentException("Username already exists")
         }
 
-        // 对密码进行加密
-        val hashedPassword = BCrypt.hashpw(password, BCrypt.gensalt())
-
-        // 创建新用户
         val user = User(
-            username = username,
-            password = hashedPassword,  // 使用加密后的密码
-            nickname = username,  // 默认昵称与用户名相同
-            avatarUrl = null,    // 默认头像为空
-            isOnline = false     // 默认离线
+            username = request.username,
+            password = passwordEncoder.encode(request.password),
+            nickname = request.nickname,
+            avatarUrl = request.avatarUrl,
+            onlineStatus = 0  // 初始状态为离线
         )
 
-        // 保存用户
-        val savedUser = userRepository.save(user)
-
-        // 返回用户信息和 token
-        return mapOf(
-            "userId" to savedUser.id,
-            "username" to savedUser.username,
-            "token" to generateToken(savedUser.id, savedUser.username)
-        )
+        return userRepository.save(user)
     }
 
     private fun generateToken(userId: Long, username: String): String {
@@ -72,4 +63,11 @@ class AuthService(private val userRepository: UserRepository) {
             "token" to generateToken(user.id, user.username)
         )
     }
-} 
+}
+
+data class RegisterRequest(
+    val username: String,
+    val password: String,
+    val nickname: String? = null,
+    val avatarUrl: String? = null
+) 

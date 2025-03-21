@@ -1,9 +1,8 @@
 package org.example.appchathandler.controller
 
 import org.example.appchathandler.service.AuthService
+import org.example.appchathandler.service.RegisterRequest
 import org.springframework.http.ResponseEntity
-import org.springframework.http.HttpStatus
-import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.web.bind.annotation.*
 
 @RestController
@@ -11,38 +10,55 @@ import org.springframework.web.bind.annotation.*
 class AuthController(private val authService: AuthService) {
 
     data class LoginRequest(
-        val username: String = "",
-        val password: String = ""
+        val username: String,
+        val password: String
     )
 
-    data class RegisterRequest(
-        val username: String = "",
-        val password: String = ""
+    data class RegisterRequestDTO(
+        val username: String,
+        val password: String,
+        val nickname: String? = null,
+        val avatarUrl: String? = null
     )
-
-    @PostMapping("/login")
-    fun login(@RequestBody request: LoginRequest): ResponseEntity<Map<String, Any>> {
-        val response = authService.login(request.username, request.password)
-        return ResponseEntity.ok(response)
-    }
 
     @PostMapping("/register")
-    fun register(@RequestBody request: RegisterRequest): ResponseEntity<Any> {
+    fun register(@RequestBody registerRequest: RegisterRequestDTO): ResponseEntity<Any> {
         return try {
-            val user = authService.register(
-                username = request.username,
-                password = request.password
+            val request = RegisterRequest(
+                username = registerRequest.username,
+                password = registerRequest.password,
+                nickname = registerRequest.nickname,
+                avatarUrl = registerRequest.avatarUrl
             )
-            ResponseEntity.ok(user)
-        } catch (e: DataIntegrityViolationException) {
-            // 用户名重复的情况
-            ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(mapOf("message" to "用户名已存在"))
+            val user = authService.register(request)
+            ResponseEntity.ok(mapOf(
+                "userId" to user.id,
+                "username" to user.username
+            ))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf(
+                "error" to e.message
+            ))
         } catch (e: Exception) {
-            ResponseEntity
-                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(mapOf("message" to "注册失败: ${e.message}"))
+            ResponseEntity.internalServerError().body(mapOf(
+                "error" to "Registration failed"
+            ))
+        }
+    }
+
+    @PostMapping("/login")
+    fun login(@RequestBody loginRequest: LoginRequest): ResponseEntity<Any> {
+        return try {
+            val result = authService.login(loginRequest.username, loginRequest.password)
+            ResponseEntity.ok(result)
+        } catch (e: RuntimeException) {
+            ResponseEntity.badRequest().body(mapOf(
+                "error" to e.message
+            ))
+        } catch (e: Exception) {
+            ResponseEntity.internalServerError().body(mapOf(
+                "error" to "Login failed"
+            ))
         }
     }
 } 

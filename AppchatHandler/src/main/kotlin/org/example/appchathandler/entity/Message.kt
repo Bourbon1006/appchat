@@ -3,6 +3,7 @@ package org.example.appchathandler.entity
 import jakarta.persistence.*
 import java.time.LocalDateTime
 import org.example.appchathandler.entity.MessageReadStatus
+import com.fasterxml.jackson.annotation.JsonIgnore
 
 @Entity
 @Table(name = "messages")
@@ -55,51 +56,51 @@ data class Message(
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
 
+    @Column(nullable = false)
+    val content: String,
+
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "sender_id", nullable = false)
+    @JoinColumn(name = "sender_id")
     val sender: User,
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "receiver_id")
-    val receiver: User?,
+    val receiver: User? = null,
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "group_id")
-    val group: Group?,
-
-    @Column(nullable = false)
-    val content: String,
+    val group: Group? = null,
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     val type: MessageType = MessageType.TEXT,
 
     @Column(name = "file_url")
-    val fileUrl: String?,
+    val fileUrl: String? = null,
 
-    @Column(nullable = false)
+    @Column(name = "timestamp")
     val timestamp: LocalDateTime = LocalDateTime.now(),
 
     @ElementCollection
-    @CollectionTable(
-        name = "message_deleted_users",
-        joinColumns = [JoinColumn(name = "message_id")]
-    )
+    @CollectionTable(name = "message_deletions", joinColumns = [JoinColumn(name = "message_id")])
     @Column(name = "user_id")
     var deletedForUsers: MutableSet<Long> = mutableSetOf(),
 
-    @OneToMany(mappedBy = "message", cascade = [CascadeType.ALL], orphanRemoval = true)
-    var readBy: MutableSet<MessageReadStatus> = mutableSetOf()
+    @OneToMany(mappedBy = "message", cascade = [CascadeType.ALL], fetch = FetchType.LAZY)
+    @JsonIgnore
+    val readStatuses: MutableSet<MessageReadStatus> = mutableSetOf()
 ) {
-    fun addReadStatus(user: User) {
-        if (!readBy.any { it.userId == user.id }) {
-            val readStatus = MessageReadStatus(
-                message = this,
-                userId = user.id,
-                readTime = LocalDateTime.now()
-            )
-            readBy.add(readStatus)
-        }
+    override fun toString(): String {
+        return "Message(id=$id, content=$content, sender=${sender.id}, receiver=${receiver?.id}, group=${group?.id}, type=$type, timestamp=$timestamp)"
+    }
+
+    fun addReadStatus(user: User): MessageReadStatus {
+        val readStatus = MessageReadStatus(
+            message = this,
+            userId = user.id,
+            readTime = LocalDateTime.now()
+        )
+        return readStatus
     }
 
     fun markAsRead(user: User) {
@@ -107,6 +108,6 @@ data class Message(
     }
 
     fun isReadBy(user: User): Boolean {
-        return readBy.any { it.userId == user.id }
+        return readStatuses.any { it.userId == user.id }
     }
 }

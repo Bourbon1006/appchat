@@ -5,11 +5,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
-import android.widget.EditText
-import android.widget.ProgressBar
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -18,18 +14,13 @@ import com.example.appchat.ChatActivity
 import com.example.appchat.R
 import com.example.appchat.adapter.ContactAdapter
 import com.example.appchat.api.ApiClient
-import com.example.appchat.databinding.FragmentFriendsListBinding
 import com.example.appchat.model.Contact
-import com.example.appchat.model.UserDTO
 import com.example.appchat.util.UserPreferences
+import com.example.appchat.websocket.WebSocketManager
 import kotlinx.coroutines.launch
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
 
 class FriendsListFragment : Fragment() {
-    private var _binding: FragmentFriendsListBinding? = null
-    private val binding get() = _binding!!
+    private lateinit var recyclerView: RecyclerView
     private lateinit var adapter: ContactAdapter
     private val contacts = mutableListOf<Contact>()
 
@@ -37,131 +28,99 @@ class FriendsListFragment : Fragment() {
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
-    ): View {
-        _binding = FragmentFriendsListBinding.inflate(inflater, container, false)
-        setupRecyclerView()
-        loadFriends()
-        return binding.root
-    }
-
-    private fun setupRecyclerView() {
-        adapter = ContactAdapter(
-            contacts = contacts,
-            onItemClick = { contact ->
-                navigateToChat(contact.id, contact.name, contact.avatarUrl)
-            }
-        )
-        binding.contactsList.adapter = adapter
-        binding.contactsList.layoutManager = LinearLayoutManager(context)
+    ): View? {
+        val view = inflater.inflate(R.layout.fragment_friends_list, container, false)
+        recyclerView = view.findViewById(R.id.friendsRecyclerView)
+        return view
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        loadContacts()
+        
+        setupRecyclerView()
+        loadFriends()
+        
+        // 注册 WebSocket 监听器，接收联系人状态更新
+        WebSocketManager.addOnlineStatusListener { userId, status ->
+            // 在联系人列表中查找对应的联系人，并更新其状态
+            val updatedContacts = contacts.map { contact ->
+                if (contact.id == userId) {
+                    contact.copy(onlineStatus = status)
+                } else {
+                    contact
+                }
+            }
+            
+            // 更新适配器
+            activity?.runOnUiThread {
+                contacts.clear()
+                contacts.addAll(updatedContacts)
+                adapter.notifyDataSetChanged()
+            }
+        }
     }
-
+    
+    private fun setupRecyclerView() {
+        adapter = ContactAdapter(contacts) { contact ->
+            // 处理联系人点击事件
+            val intent = Intent(requireContext(), ChatActivity::class.java).apply {
+                putExtra("chat_type", "PRIVATE")  // 使用 ChatActivity 期望的参数名
+                putExtra("receiver_id", contact.id)  // 使用 ChatActivity 期望的参数名
+                putExtra("receiver_name", contact.nickname ?: contact.username)  // 使用 ChatActivity 期望的参数名
+            }
+            startActivity(intent)
+        }
+        
+        recyclerView.apply {
+            layoutManager = LinearLayoutManager(context)
+            adapter = this@FriendsListFragment.adapter
+        }
+    }
+    
+    fun refreshFriendsList() {
+        loadFriends()
+    }
+    
+    private fun loadFriends() {
+        val userId = UserPreferences.getUserId(requireContext())
+        
+        lifecycleScope.launch {
+            try {
+                val response = ApiClient.apiService.getFriends(userId)
+                if (response.isSuccessful) {
+                    response.body()?.let { userList ->
+                        // 将 UserDTO 转换为 Contact
+                        val contactList = userList.map { user ->
+                            Contact(
+                                id = user.id,
+                                username = user.username,
+                                nickname = user.nickname,
+                                avatarUrl = user.avatarUrl,
+                                onlineStatus = user.onlineStatus ?: 0
+                            )
+                        }
+                        contacts.clear()
+                        contacts.addAll(contactList)
+                        adapter.notifyDataSetChanged()
+                    }
+                } else {
+                    Toast.makeText(context, "加载好友列表失败", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "网络错误", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    
     override fun onDestroyView() {
         super.onDestroyView()
-        _binding = null
+        // 移除 WebSocket 监听器
+        WebSocketManager.removeOnlineStatusListener()
     }
-
-    private fun navigateToChat(userId: Long, userName: String, userAvatar: String) {
-        val intent = Intent(requireContext(), ChatActivity::class.java).apply {
-            putExtra("receiver_id", userId)
-            putExtra("receiver_name", userName)
-            putExtra("partnerAvatar", userAvatar)
-            putExtra("chat_type", "PRIVATE")
-        }
-        startActivity(intent)
-    }
-
-    private fun loadContacts() {
-        val userId = UserPreferences.getUserId(requireContext())
-        viewLifecycleOwner.lifecycleScope.launch {
-            try {
-                val response = ApiClient.apiService.getFriends(userId)
-                if (response.isSuccessful) {
-                    contacts.clear()
-                    contacts.addAll(response.body()?.map { user ->
-                        Contact(
-                            id = user.id,
-                            name = user.nickname ?: user.username,
-                            avatarUrl = user.avatarUrl ?: "",
-                            isOnline = user.isOnline
-                        )
-                    } ?: emptyList())
-                    adapter.notifyDataSetChanged()
-                }
-            } catch (e: Exception) {
-                Toast.makeText(context, "加载联系人失败: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun showFriendOptionsDialog(contact: UserDTO) {
-        AlertDialog.Builder(requireContext())
-            .setTitle(contact.username)
-            .setItems(arrayOf("发送消息", "删除好友")) { _, which ->
-                when (which) {
-                    0 -> navigateToChat(contact.id, contact.nickname ?: contact.username, contact.avatarUrl ?: "")
-                    1 -> showDeleteFriendConfirmDialog(contact)
-                }
-            }
-            .show()
-    }
-
-    private fun showDeleteFriendConfirmDialog(contact: UserDTO) {
-        AlertDialog.Builder(requireContext())
-            .setTitle("删除好友")
-            .setMessage("确定要删除好友 ${contact.username} 吗？")
-            .setPositiveButton("确定") { _, _ ->
-                deleteFriend(contact.id)
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    private fun deleteFriend(friendId: Long) {
-        lifecycleScope.launch {
-            try {
-                ApiClient.apiService.deleteFriend(
-                    userId = UserPreferences.getUserId(requireContext()),
-                    friendId = friendId
-                )
-                Toast.makeText(context, "删除成功", Toast.LENGTH_SHORT).show()
-                loadContacts() // 重新加载好友列表
-            } catch (e: Exception) {
-                Toast.makeText(context, "删除失败: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun loadFriends() {
-        lifecycleScope.launch {
-            try {
-                val userId = UserPreferences.getUserId(requireContext())
-                val response = ApiClient.apiService.getFriends(userId)
-                if (response.isSuccessful) {
-                    contacts.clear()
-                    contacts.addAll(response.body()?.map { user ->
-                        Contact(
-                            id = user.id,
-                            name = user.nickname ?: user.username,
-                            avatarUrl = user.avatarUrl ?: "",
-                            isOnline = user.isOnline
-                        )
-                    } ?: emptyList())
-                    adapter.notifyDataSetChanged()
-                }
-            } catch (e: Exception) {
-                Toast.makeText(requireContext(), "加载好友列表失败", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    fun refreshFriendsList() {
-        if (isAdded) {
-            loadFriends()
-        }
+    
+    override fun onResume() {
+        super.onResume()
+        // 每次恢复时重新加载好友列表
+        loadFriends()
     }
 } 

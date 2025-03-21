@@ -111,10 +111,12 @@ class MomentService(
         // 获取点赞用户列表
         val likeUsers = momentLikeRepository.findByMomentId(moment.id).map { like ->
             val user = userService.getUser(like.id.userId)
-            LikeUserDTO(
+            UserDTO(
                 id = user.id,
                 username = user.username,
-                avatarUrl = user.avatarUrl
+                nickname = user.nickname,
+                avatarUrl = user.avatarUrl,
+                onlineStatus = user.onlineStatus ?: 0
             )
         }
         
@@ -122,7 +124,8 @@ class MomentService(
             id = moment.id,
             userId = moment.user.id,
             username = moment.user.username,
-            userAvatar = moment.user.avatarUrl,
+            userNickname = moment.user.nickname,
+            userAvatar = if (moment.user.avatarUrl != null) "/api/users/${moment.user.id}/avatar" else null,
             content = moment.content,
             imageUrl = moment.imageUrl,
             createTime = moment.createTime,
@@ -139,7 +142,8 @@ class MomentService(
             id = comment.id,
             userId = comment.user.id,
             username = comment.user.username,
-            userAvatar = comment.user.avatarUrl,
+            userNickname = comment.user.nickname,
+            userAvatar = if (comment.user.avatarUrl != null) "/api/users/${comment.user.id}/avatar" else null,
             content = comment.content,
             createTime = comment.createTime
         )

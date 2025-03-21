@@ -12,6 +12,9 @@ import org.example.appchathandler.dto.UserDTO
 import org.example.appchathandler.dto.toDTO
 import org.slf4j.LoggerFactory
 import org.springframework.web.multipart.MultipartFile
+import org.springframework.context.ApplicationEvent
+import org.springframework.context.ApplicationEventPublisher
+import org.springframework.beans.factory.annotation.Autowired
 
 @Service
 class UserService(
@@ -21,15 +24,19 @@ class UserService(
 ) {
     private val logger = LoggerFactory.getLogger(UserService::class.java)
 
+    // 创建事件发布器
+    @Autowired
+    private lateinit var eventPublisher: ApplicationEventPublisher
+
     @Transactional
-    fun setUserOnline(userId: Long, isOnline: Boolean) {
+    fun setUserOnline(userId: Long, status: Int) {
         val user = getUser(userId)
-        user.isOnline = isOnline
+        user.onlineStatus = status
         userRepository.save(user)
     }
 
     fun getOnlineUsers(): List<UserDTO> {
-        return userRepository.findByIsOnlineTrue().map { it.toDTO() }
+        return userRepository.findByOnlineStatus(1).map { it.toDTO() }
     }
 
     fun getUser(userId: Long): User {
@@ -64,7 +71,8 @@ class UserService(
 
     @Transactional
     fun getUserContacts(userId: Long): List<UserDTO> {
-        return getUser(userId).contacts.map { it.toDTO() }
+        val user = getUser(userId)
+        return user.contacts.map { it.toDTO() }
     }
 
     @Transactional
@@ -79,7 +87,7 @@ class UserService(
         val user = User(
             username = username,
             password = passwordEncoder.encode(password),
-            isOnline = false
+            onlineStatus = 0
         )
         return userRepository.save(user)
     }
@@ -136,4 +144,42 @@ class UserService(
         val savedUser = userRepository.save(user)
         return savedUser.toDTO()
     }
-} 
+
+    @Transactional
+    fun updateOnlineStatus(userId: Long, status: Int) {
+        val user = userRepository.findById(userId).orElseThrow()
+        user.onlineStatus = status
+        userRepository.save(user)
+        
+        // 发布状态更新事件而不是直接调用 WebSocket
+        eventPublisher.publishEvent(UserStatusUpdateEvent(this, userId, status))
+    }
+
+    @Transactional
+    fun updateNickname(userId: Long, nickname: String): User {
+        val user = userRepository.findById(userId).orElseThrow()
+        user.nickname = nickname
+        return userRepository.save(user)
+    }
+
+    @Transactional
+    fun updatePassword(userId: Long, oldPassword: String, newPassword: String) {
+        val user = userRepository.findById(userId).orElseThrow()
+        
+        // 验证旧密码
+        if (!passwordEncoder.matches(oldPassword, user.password)) {
+            throw IllegalArgumentException("旧密码错误")
+        }
+        
+        // 更新新密码
+        user.password = passwordEncoder.encode(newPassword)
+        userRepository.save(user)
+    }
+}
+
+// 创建状态更新事件类
+class UserStatusUpdateEvent(
+    source: Any,
+    val userId: Long,
+    val status: Int
+) : ApplicationEvent(source) 

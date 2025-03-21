@@ -65,8 +65,8 @@ class MessageSessionAdapter(
             holder.avatar.setImageResource(R.drawable.default_avatar)
         }
 
-        // 设置名称
-        holder.name.text = session.partnerName
+        // 设置名称 - 确保使用 partnerName，它应该已经是 nickname
+        holder.name.text = session.partnerName  // partnerName 应该已经是 nickname
 
         // 设置最后一条消息
         holder.lastMessage.text = session.lastMessage
@@ -147,22 +147,27 @@ class MessageSessionAdapter(
         val userId = UserPreferences.getUserId(context)
         coroutineScope.launch {
             try {
+                println("📱 Marking session as read: userId=$userId, partnerId=${session.partnerId}, type=${session.type}")
                 val response = ApiClient.apiService.markSessionAsRead(
                     userId = userId,
                     partnerId = session.partnerId,
                     type = session.type.uppercase()
                 )
+                println("📱 markSessionAsRead API response: $response")
+                
                 if (response.isSuccessful) {
                     // 直接刷新会话列表，而不是修改现有对象
                     val sessions = ApiClient.apiService.getMessageSessions(userId)
                     updateSessions(sessions)
                     Toast.makeText(context, "已标记为已读", Toast.LENGTH_SHORT).show()
                 } else {
-                    Toast.makeText(context, "操作失败", Toast.LENGTH_SHORT).show()
+                    println("❌ Failed to mark session as read: ${response.code()} - ${response.message()}")
+                    Toast.makeText(context, "操作失败: ${response.code()}", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-                Toast.makeText(context, "网络错误", Toast.LENGTH_SHORT).show()
+                println("❌ Exception marking session as read: ${e.message}")
+                Toast.makeText(context, "网络错误: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }

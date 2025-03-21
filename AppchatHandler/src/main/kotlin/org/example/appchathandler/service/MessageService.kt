@@ -21,13 +21,13 @@ import org.example.appchathandler.event.SessionsUpdateEvent
 @Service
 class MessageService(
     private val messageRepository: MessageRepository,
-    private val userService: UserService,
-    private val groupService: GroupService,
-    private val applicationEventPublisher: ApplicationEventPublisher,
-    private val messageReadStatusRepository: MessageReadStatusRepository,
     private val userRepository: UserRepository,
-    private val groupRepository: GroupRepository
+    private val groupRepository: GroupRepository,
+    private val messageReadStatusRepository: MessageReadStatusRepository
 ) {
+    @Autowired
+    private lateinit var applicationEventPublisher: ApplicationEventPublisher
+
     fun createMessage(
         content: String,
         senderId: Long,
@@ -36,15 +36,11 @@ class MessageService(
         type: MessageType = MessageType.TEXT,
         fileUrl: String? = null
     ): Message {
-        val sender = userService.getUser(senderId)
-        val receiver = receiverId?.let { userService.getUser(it) }
-        val group = groupId?.let { groupService.getGroup(it).let { dto ->
-            Group(
-                id = dto.id,
-                name = dto.name,
-                creator = userService.getUser(dto.creator.id)
-            )
-        }}
+        val sender = userRepository.findById(senderId).orElseThrow {
+            IllegalArgumentException("User with id $senderId not found")
+        }
+        val receiver = receiverId?.let { userRepository.findById(it).orElse(null) }
+        val group = groupId?.let { groupRepository.findById(it).orElse(null) }
 
         if (receiver == null && group == null) {
             throw IllegalArgumentException("必须指定接收者或群组")
@@ -94,7 +90,9 @@ class MessageService(
     }
 
     fun getUserMessages(userId: Long): List<Message> {
-        val user = userService.getUser(userId)
+        val user = userRepository.findById(userId).orElseThrow {
+            IllegalArgumentException("User with id $userId not found")
+        }
         return messageRepository.findByUserMessages(user)
     }
 
@@ -103,12 +101,16 @@ class MessageService(
         startDate: LocalDateTime,
         endDate: LocalDateTime
     ): List<Message> {
-        val user = userService.getUser(userId)
+        val user = userRepository.findById(userId).orElseThrow {
+            IllegalArgumentException("User with id $userId not found")
+        }
         return messageRepository.findByDateRange(user, startDate, endDate)
     }
 
     fun searchMessages(userId: Long, keyword: String): List<Message> {
-        val user = userService.getUser(userId)
+        val user = userRepository.findById(userId).orElseThrow {
+            IllegalArgumentException("User with id $userId not found")
+        }
         return messageRepository.searchMessages(user, "%$keyword%")
     }
 
@@ -126,12 +128,14 @@ class MessageService(
         startTime: LocalDateTime,
         endTime: LocalDateTime
     ): List<Message> {
-        val group = groupService.getGroup(groupId)
+        val group = groupRepository.findById(groupId).orElseThrow {
+            IllegalArgumentException("Group with id $groupId not found")
+        }
         return messageRepository.findByGroupAndDateRange(
             Group(
                 id = group.id,
                 name = group.name,
-                creator = userService.getUser(group.creator.id)
+                creator = userRepository.findById(group.creator.id).orElse(null)
             ),
             startTime,
             endTime
@@ -154,7 +158,7 @@ class MessageService(
     fun deleteMessageCompletely(messageId: Long) {
         try {
             // First, delete all read status entries for this message
-            messageReadStatusRepository.deleteByMessageId(messageId)
+            messageRepository.deleteAllReadStatusesForMessage(messageId)
             
             // Then delete the message itself
             messageRepository.deleteById(messageId)
@@ -273,7 +277,9 @@ class MessageService(
     fun savePrivateMessage(message: Message, receiverId: Long): Message {
         try {
             println("⭐ Saving private message: senderId=${message.sender.id}, receiverId=$receiverId")
-            val receiver = userService.getUser(receiverId)
+            val receiver = userRepository.findById(receiverId).orElseThrow {
+                IllegalArgumentException("User with id $receiverId not found")
+            }
             val newMessage = message.copy(receiver = receiver)
             val savedMessage = messageRepository.save(newMessage)
             println("✅ Private message saved successfully: id=${savedMessage.id}")
@@ -288,14 +294,9 @@ class MessageService(
     fun saveGroupMessage(message: Message, groupId: Long): Message {
         try {
             println("⭐ Saving group message: senderId=${message.sender.id}, groupId=$groupId")
-            val groupDto = groupService.getGroup(groupId)
-            // 将 GroupDTO 转换为 Group 实体
-            val group = Group(
-                id = groupDto.id,
-                name = groupDto.name,
-                creator = userService.getUser(groupDto.creator.id),
-                members = groupDto.members.map { userService.getUser(it.id) }.toMutableSet()
-            )
+            val group = groupRepository.findById(groupId).orElseThrow {
+                IllegalArgumentException("Group with id $groupId not found")
+            }
             val newMessage = message.copy(group = group)
             val savedMessage = messageRepository.save(newMessage)
             println("✅ Group message saved successfully: id=${savedMessage.id}")
@@ -309,18 +310,7 @@ class MessageService(
 
     fun markSessionAsRead(userId: Long, partnerId: Long, type: String) {
         val user = userRepository.findById(userId).orElseThrow()
-        val unreadMessages = messageReadStatusRepository.findUnreadMessages(userId, partnerId)
-        
-        unreadMessages.forEach { message ->
-            message.addReadStatus(user)
-        }
-        
-        messageRepository.saveAll(unreadMessages)
-    }
-
-    fun markGroupMessagesAsRead(userId: Long, groupId: Long) {
-        val user = userRepository.findById(userId).orElseThrow()
-        val unreadMessages = messageRepository.findUnreadGroupMessages(userId, groupId)
+        val unreadMessages = messageRepository.findUnreadMessages(userId, partnerId)
         
         unreadMessages.forEach { message ->
             message.addReadStatus(user)
@@ -330,25 +320,75 @@ class MessageService(
     }
 
     @Transactional
-    fun markPrivateMessagesAsRead(userId: Long, partnerId: Long) {
-        println("⭐ Marking private messages as read: userId=$userId, partnerId=$partnerId")
-        
-        // 获取所有未读消息
-        val unreadMessages = messageReadStatusRepository.findUnreadMessages(userId, partnerId)
-
-        // 为每条消息创建已读状态
-        unreadMessages.forEach { message ->
-            if (!messageReadStatusRepository.existsByMessageIdAndUserId(message.id, userId)) {
-                val readStatus = MessageReadStatus(
-                    message = message,
-                    userId = userId
-                )
-                messageReadStatusRepository.save(readStatus)
-                println("✅ Marked message ${message.id} as read for user $userId")
+    fun markGroupMessagesAsRead(userId: Long, groupId: Long) {
+        try {
+            println("📬 Marking group messages as read: userId=$userId, groupId=$groupId")
+            
+            // 查找所有群组中的未读消息
+            val unreadMessages = messageRepository.findUnreadGroupMessages(userId, groupId)
+            println("📊 Found ${unreadMessages.size} unread group messages")
+            
+            // 标记为已读
+            for (message in unreadMessages) {
+                // 检查消息是否已经被标记为已读
+                val isAlreadyRead = messageReadStatusRepository.existsByMessageIdAndUserId(message.id, userId)
+                
+                if (!isAlreadyRead) {
+                    // 创建新的 MessageReadStatus 对象
+                    val readStatus = MessageReadStatus(
+                        message = message,
+                        userId = userId,
+                        readTime = LocalDateTime.now()
+                    )
+                    messageReadStatusRepository.save(readStatus)
+                    println("✅ Marked group message ${message.id} as read")
+                }
             }
+            
+            // 通知会话更新
+            notifySessionUpdate(userId)
+            
+        } catch (e: Exception) {
+            println("❌ Error marking group messages as read: ${e.message}")
+            e.printStackTrace()
+            throw e
         }
+    }
 
-        println("✅ Successfully marked all private messages as read")
+    @Transactional
+    fun markPrivateMessagesAsRead(userId: Long, partnerId: Long) {
+        try {
+            println("📬 Marking private messages as read: userId=$userId, partnerId=$partnerId")
+            
+            // 查找所有从 partnerId 发送给 userId 的未读消息
+            val unreadMessages = messageRepository.findUnreadMessagesFromUser(partnerId, userId)
+            println("📊 Found ${unreadMessages.size} unread messages")
+            
+            // 标记为已读
+            for (message in unreadMessages) {
+                // 检查消息是否已经被标记为已读
+                val isAlreadyRead = messageReadStatusRepository.existsByMessageIdAndUserId(message.id, userId)
+                
+                if (!isAlreadyRead) {
+                    // 创建新的 MessageReadStatus 对象，但不要设置双向关联
+                    val readStatus = MessageReadStatus(
+                        message = message,
+                        userId = userId,
+                        readTime = LocalDateTime.now()
+                    )
+                    messageReadStatusRepository.save(readStatus)
+                    println("✅ Marked message ${message.id} as read")
+                }
+            }
+            
+            // 通知会话更新
+            notifySessionUpdate(userId)
+            
+        } catch (e: Exception) {
+            println("❌ Error marking private messages as read: ${e.message}")
+            e.printStackTrace()
+            throw e
+        }
     }
 
     @Transactional
@@ -385,18 +425,22 @@ class MessageService(
                     val partner = if (message.sender.id == userId) message.receiver else message.sender
                     
                     partner?.let { user ->
-                        val unreadCount = messageReadStatusRepository.countUnreadMessages(userId, partnerId ?: 0)
+                        val unreadCount = if (message.sender.id == userId) {
+                            0
+                        } else {
+                            messageRepository.countUnreadMessages(userId, message.sender.id)
+                        }
                         sessions.add(MessageSessionDTO(
                             id = message.id,
                             partnerId = user.id,
-                            partnerName = user.username,
+                            partnerName = user.nickname ?: user.username ?: "Unknown",
                             lastMessage = message.content,
                             lastMessageTime = message.timestamp,
                             unreadCount = unreadCount,
                             type = MessageSessionInfo.Type.PRIVATE,
-                            partnerAvatar = user.avatarUrl
+                            partnerAvatar = if (user.avatarUrl != null) "/api/users/${user.id}/avatar" else null
                         ))
-                        println("✅ Added private session with ${user.username}")
+                        println("✅ Added private session with ${user.nickname ?: user.username}")
                     }
                 } catch (e: Exception) {
                     println("❌ Error processing private message ${message.id}: ${e.message}")
@@ -408,7 +452,7 @@ class MessageService(
             groupMessages.forEach { message ->
                 try {
                     message.group?.let { group ->
-                        val unreadCount = messageReadStatusRepository.countUnreadMessages(userId, group.id)
+                        val unreadCount = messageRepository.countUnreadGroupMessages(userId, group.id)
                         sessions.add(MessageSessionDTO(
                             id = message.id,
                             partnerId = group.id,
@@ -417,7 +461,7 @@ class MessageService(
                             lastMessageTime = message.timestamp,
                             unreadCount = unreadCount,
                             type = MessageSessionInfo.Type.GROUP,
-                            partnerAvatar = group.avatarUrl
+                            partnerAvatar = if (group.avatarUrl != null) "/api/users/${group.id}/avatar" else null
                         ))
                         println("✅ Added group session for ${group.name}")
                     }
@@ -466,5 +510,23 @@ class MessageService(
     private fun notifySessionUpdate(userId: Long) {
         val sessions = getMessageSessions(userId)
         applicationEventPublisher.publishEvent(SessionsUpdateEvent(userId, sessions))
+    }
+
+    fun convertToMessageDTO(message: Message): MessageDTO {
+        val sender = userRepository.findById(message.sender.id).orElse(null)
+        
+        return MessageDTO(
+            id = message.id,
+            content = message.content,
+            senderId = message.sender.id,
+            senderName = sender?.username ?: "Unknown",
+            senderNickname = sender?.nickname,
+            receiverId = message.receiver?.id,
+            receiverName = if (message.receiver?.id != null) userRepository.findById(message.receiver!!.id).orElse(null)?.username else null,
+            groupId = message.group?.id,
+            type = message.type,
+            fileUrl = message.fileUrl,
+            timestamp = message.timestamp
+        )
     }
 }

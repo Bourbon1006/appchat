@@ -15,6 +15,7 @@ import org.springframework.web.multipart.MultipartFile
 import java.util.UUID
 import org.springframework.beans.factory.annotation.Value
 import org.example.appchathandler.repository.MessageRepository
+import org.example.appchathandler.service.UserService
 
 @RestController
 @RequestMapping("/api/messages")
@@ -22,7 +23,8 @@ import org.example.appchathandler.repository.MessageRepository
 class MessageController(
     private val messageService: MessageService,
     private val messageRepository: MessageRepository,
-    @Value("\${file.upload.dir}") private val uploadDir: String
+    @Value("\${file.upload.dir}") private val uploadDir: String,
+    private val userService: UserService
 ) {
     @GetMapping("/group/{groupId}")
     fun getGroupMessages(

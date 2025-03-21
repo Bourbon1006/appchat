@@ -312,7 +312,14 @@ class MessageAdapter(
             }
 
             // 始终设置用户名，不管头像是否加载
-            senderName.text = message.senderName
+            if (message.senderId == currentUserId) {
+                // 对于自己发送的消息，使用缓存的昵称
+                val nickname = UserPreferences.getUserNickname(context)
+                senderName.text = if (!nickname.isNullOrEmpty()) nickname else message.senderName
+            } else {
+                // 对于接收的消息，使用消息中的发送者名称
+                senderName.text = message.senderName
+            }
             senderName.visibility = View.VISIBLE
 
             Glide.with(context)
@@ -357,7 +364,7 @@ class MessageAdapter(
             senderName.apply {
                 if (message.chatType == "GROUP" && message.senderId != currentUserId) {
                     visibility = View.VISIBLE
-                    text = message.senderName
+                    text = if (!message.senderNickname.isNullOrEmpty()) message.senderNickname else message.senderName
                 } else {
                     visibility = View.GONE
                 }

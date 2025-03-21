@@ -12,48 +12,37 @@ import java.time.LocalDateTime
 @RestController
 @RequestMapping("/api/friends")
 class FriendRequestController(
-    private val friendRequestService: FriendRequestService,
-    private val webSocketHandler: ChatWebSocketHandler
+    private val friendRequestService: FriendRequestService
 ) {
     
     data class FriendRequestDTO(
-        val id: Long,
-        val sender: UserDTO,
-        val receiver: UserDTO,
-        val status: String,
-        val timestamp: String
+        val senderId: Long,
+        val receiverId: Long
     )
 
     private fun FriendRequest.toDTO() = FriendRequestDTO(
-        id = id,
-        sender = UserDTO(
-            id = sender.id,
-            username = sender.username,
-            nickname = sender.nickname,
-            avatarUrl = sender.avatarUrl,
-            isOnline = sender.isOnline
-        ),
-        receiver = UserDTO(
-            id = receiver.id,
-            username = receiver.username,
-            nickname = receiver.nickname,
-            avatarUrl = receiver.avatarUrl,
-            isOnline = receiver.isOnline
-        ),
-        status = status.name,
-        timestamp = timestamp.toString()
+        senderId = sender.id,
+        receiverId = receiver.id
     )
     
     @PostMapping("/request")
-    fun sendFriendRequest(
-        @RequestParam senderId: Long,
-        @RequestParam receiverId: Long
-    ): ResponseEntity<Unit> {
+    fun sendFriendRequest(@RequestBody request: FriendRequestDTO): ResponseEntity<FriendRequest> {
         return try {
-            val request = friendRequestService.sendFriendRequest(senderId, receiverId)
-            // 通过 WebSocket 通知接收者
-            webSocketHandler.sendFriendRequest(request)
-            ResponseEntity.ok().build()
+            val sender = User(
+                id = request.senderId,
+                username = "",  // 这些值会被服务层覆盖
+                password = "",
+                onlineStatus = 0
+            )
+            
+            val receiver = User(
+                id = request.receiverId,
+                username = "",  // 这些值会被服务层覆盖
+                password = "",
+                onlineStatus = 0
+            )
+
+            ResponseEntity.ok(friendRequestService.createFriendRequest(sender, receiver))
         } catch (e: Exception) {
             ResponseEntity.badRequest().build()
         }
@@ -82,7 +71,7 @@ class FriendRequestController(
             println("✅ 好友请求处理成功: ${updatedRequest.status}")
             
             // 通知相关用户
-            webSocketHandler.notifyFriendRequestResult(updatedRequest)
+            // webSocketHandler.notifyFriendRequestResult(updatedRequest)
             
             ResponseEntity.ok().build()
         } catch (e: Exception) {

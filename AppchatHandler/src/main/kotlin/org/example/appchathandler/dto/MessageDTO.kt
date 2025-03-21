@@ -10,6 +10,7 @@ data class MessageDTO(
     val timestamp: LocalDateTime,
     val senderId: Long,
     val senderName: String,
+    val senderNickname: String? = null,
     val receiverId: Long?,
     val receiverName: String?,
     val groupId: Long?,

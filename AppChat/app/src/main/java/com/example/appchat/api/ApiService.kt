@@ -217,6 +217,30 @@ interface ApiService {
 
     @GET("api/friends/pending/{userId}")
     suspend fun getPendingRequests(@Path("userId") userId: Long): Response<List<FriendRequest>>
+
+    @PUT("api/users/{userId}/status")
+    suspend fun updateOnlineStatus(
+        @Path("userId") userId: Long,
+        @Query("status") status: Int
+    ): Response<Unit>
+
+    @PUT("api/users/{userId}/nickname")
+    suspend fun updateNickname(
+        @Path("userId") userId: Long,
+        @Body request: UpdateNicknameRequest
+    ): Response<Void>
+
+    @PUT("api/users/{userId}/password")
+    suspend fun updatePassword(
+        @Path("userId") userId: Long,
+        @Body request: UpdatePasswordRequest
+    ): Response<Unit>
+
+    @PUT("api/messages/read")
+    suspend fun markMessagesAsRead(
+        @Query("sessionId") sessionId: Long,
+        @Query("userId") userId: Long
+    ): Response<Unit>
 }
 
 data class DeleteMessageResponse(
@@ -230,4 +254,13 @@ data class CreateMomentRequest(
 
 data class CreateCommentRequest(
     val content: String
+)
+
+data class UpdateNicknameRequest(
+    val nickname: String
+)
+
+data class UpdatePasswordRequest(
+    val oldPassword: String,
+    val newPassword: String
 )

@@ -5,6 +5,7 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
+    <!-- 顶部标签页 -->
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/tabLayout"
         android:layout_width="match_parent"
@@ -24,50 +25,62 @@
 
     </com.google.android.material.tabs.TabLayout>
 
+    <!-- ViewPager2 用于切换好友和群组页面 -->
     <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/viewPager"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1" />
 
-    <!-- 好友请求入口 -->
+    <!-- 底部好友请求入口 -->
     <LinearLayout
         android:id="@+id/friendRequestSection"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:padding="16dp"
-        android:background="?attr/selectableItemBackground"
-        android:clickable="true"
-        android:focusable="true">
-        
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="?attr/selectableItemBackground">
+
         <ImageView
             android:layout_width="24dp"
             android:layout_height="24dp"
-            android:src="@drawable/ic_friend_request"/>
-            
+            android:src="@drawable/ic_person_add"
+            android:tint="@color/colorPrimary" />
+
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginStart="16dp"
-            android:text="好友请求"/>
-            
+            android:text="好友请求"
+            android:textSize="16sp" />
+
         <TextView
             android:id="@+id/friendRequestBadge"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:minWidth="20dp"
-            android:gravity="center"
-            android:textColor="@color/white"
             android:background="@drawable/badge_background"
-            android:visibility="gone"/>
+            android:textColor="@android:color/white"
+            android:textSize="12sp"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:visibility="gone" />
     </LinearLayout>
-    
-    <!-- 现有的联系人列表 -->
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#E0E0E0" />
+
+    <!-- 联系人列表 - 仅在需要时使用，通常隐藏 -->
     <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/contactsList"
+        android:id="@+id/contactsRecyclerView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"/>
+        android:layout_weight="0"
+        android:visibility="gone" />
 
 </LinearLayout>

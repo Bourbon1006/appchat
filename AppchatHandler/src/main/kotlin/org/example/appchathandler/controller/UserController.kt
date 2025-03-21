@@ -39,11 +39,15 @@ class UserController(
 
     @GetMapping("/{userId}")
     fun getUser(@PathVariable userId: Long): ResponseEntity<UserDTO> {
-        return try {
-            ResponseEntity.ok(userService.getUser(userId).toDTO())
-        } catch (e: NoSuchElementException) {
-            ResponseEntity.notFound().build()
-        }
+        val user = userService.getUser(userId) ?: return ResponseEntity.notFound().build()
+        
+        return ResponseEntity.ok(UserDTO(
+            id = user.id,
+            username = user.username,
+            nickname = user.nickname,
+            avatarUrl = if (user.avatarUrl != null) "/api/users/${user.id}/avatar" else null,
+            onlineStatus = user.onlineStatus ?: 0
+        ))
     }
 
     @PutMapping("/{userId}")
@@ -160,4 +164,52 @@ class UserController(
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
         }
     }
-} 
+
+    @PutMapping("/{userId}/status")
+    fun updateOnlineStatus(
+        @PathVariable userId: Long,
+        @RequestParam status: Int
+    ): ResponseEntity<Unit> {
+        return try {
+            userService.updateOnlineStatus(userId, status)
+            ResponseEntity.ok().build()
+        } catch (e: Exception) {
+            ResponseEntity.internalServerError().build()
+        }
+    }
+
+    @PutMapping("/{userId}/nickname")
+    fun updateNickname(
+        @PathVariable userId: Long,
+        @RequestBody request: UpdateNicknameRequest
+    ): ResponseEntity<UserDTO> {
+        return try {
+            val user = userService.updateNickname(userId, request.nickname)
+            ResponseEntity.ok(user.toDTO())
+        } catch (e: Exception) {
+            ResponseEntity.internalServerError().build()
+        }
+    }
+
+    @PutMapping("/{userId}/password")
+    fun updatePassword(
+        @PathVariable userId: Long,
+        @RequestBody request: UpdatePasswordRequest
+    ): ResponseEntity<Unit> {
+        return try {
+            userService.updatePassword(userId, request.oldPassword, request.newPassword)
+            ResponseEntity.ok().build()
+        } catch (e: Exception) {
+            ResponseEntity.internalServerError().build()
+        }
+    }
+}
+
+data class UpdateNicknameRequest(
+    val nickname: String
+)
+
+data class UpdatePasswordRequest(
+    val oldPassword: String,
+    val newPassword: String
+) 

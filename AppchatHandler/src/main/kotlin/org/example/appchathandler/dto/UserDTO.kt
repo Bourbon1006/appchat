@@ -7,7 +7,7 @@ data class UserDTO(
     val username: String,
     val nickname: String?,
     val avatarUrl: String?,
-    val isOnline: Boolean
+    val onlineStatus: Int = 0
 )
 
 fun User.toDTO() = UserDTO(
@@ -15,5 +15,5 @@ fun User.toDTO() = UserDTO(
     username = username,
     nickname = nickname,
     avatarUrl = avatarUrl,
-    isOnline = isOnline
+    onlineStatus = onlineStatus
 ) 

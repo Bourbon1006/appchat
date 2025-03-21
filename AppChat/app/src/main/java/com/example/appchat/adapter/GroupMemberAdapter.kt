@@ -29,7 +29,9 @@ class GroupMemberAdapter(
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val member = members[position]
-        holder.userName.text = member.username
+        
+        // 使用 nickname 而不是 username
+        holder.userName.text = member.nickname ?: member.username
 
         // 只有群主可以移除其他成员
         holder.removeButton.visibility = if (isCreator && member.id != currentUserId) {

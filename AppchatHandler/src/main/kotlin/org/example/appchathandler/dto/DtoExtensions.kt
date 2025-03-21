@@ -6,13 +6,15 @@ import org.example.appchathandler.entity.FriendRequest
 import org.example.appchathandler.websocket.ChatWebSocketHandler.UserStatusDTO
 import org.example.appchathandler.websocket.ChatWebSocketHandler.FriendRequestDTO
 import java.time.LocalDateTime
+import org.example.appchathandler.entity.MessageType
 
 fun User.toStatusDTO() = UserStatusDTO(
     id = id,
     username = username,
     nickname = nickname,
     avatarUrl = avatarUrl,
-    isOnline = isOnline
+    onlineStatus = onlineStatus,
+    isOnline = onlineStatus > 0
 )
 
 fun Message.toDTO() = MessageDTO(

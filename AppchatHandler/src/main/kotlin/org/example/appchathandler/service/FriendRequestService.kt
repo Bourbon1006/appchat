@@ -7,15 +7,21 @@ import org.example.appchathandler.event.FriendRequestEvent
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.example.appchathandler.websocket.ChatWebSocketHandler
+import org.example.appchathandler.entity.User
+import java.time.LocalDateTime
+import org.springframework.beans.factory.annotation.Autowired
+import org.example.appchathandler.event.FriendRequestNotificationEvent
 
 @Service
 class FriendRequestService(
     private val friendRequestRepository: FriendRequestRepository,
     private val friendService: FriendService,
-    private val userService: UserService,
-    private val eventPublisher: ApplicationEventPublisher
+    private val userService: UserService
 ) {
-    
+    @Autowired
+    private lateinit var eventPublisher: ApplicationEventPublisher
+
     @Transactional
     fun sendFriendRequest(senderId: Long, receiverId: Long): FriendRequest {
         val sender = userService.getUser(senderId)
@@ -106,5 +112,39 @@ class FriendRequestService(
 
     fun getFriendRequest(requestId: Long): FriendRequest? {
         return friendRequestRepository.findById(requestId).orElse(null)
+    }
+
+    @Transactional
+    fun createFriendRequest(sender: User, receiver: User): FriendRequest {
+        // 获取完整的用户信息
+        val fullSender = userService.getUser(sender.id)
+        val fullReceiver = userService.getUser(receiver.id)
+        
+        // 检查是否已经是好友
+        if (fullSender.contacts.any { it.id == receiver.id }) {
+            throw IllegalStateException("已经是好友关系")
+        }
+        
+        // 检查是否已经有待处理的请求
+        if (friendRequestRepository.findBySenderAndReceiverAndStatus(
+                fullSender, fullReceiver, RequestStatus.PENDING
+            ) != null) {
+            throw IllegalStateException("已经发送过好友请求")
+        }
+        
+        // 创建新的好友请求
+        val request = FriendRequest(
+            sender = fullSender,
+            receiver = fullReceiver,
+            status = RequestStatus.PENDING,
+            timestamp = LocalDateTime.now()
+        )
+        
+        val savedRequest = friendRequestRepository.save(request)
+        
+        // 发布通知事件
+        eventPublisher.publishEvent(FriendRequestNotificationEvent(this, savedRequest))
+        
+        return savedRequest
     }
 } 

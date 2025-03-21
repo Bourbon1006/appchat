@@ -6,21 +6,20 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
-import com.bumptech.glide.Glide
 import com.example.appchat.R
 import com.example.appchat.model.Contact
 import com.example.appchat.util.loadAvatar
 
 class ContactAdapter(
-    private val contacts: List<Contact>,
-    private val onItemClick: (Contact) -> Unit,
-    private val onItemLongClick: ((Contact) -> Unit)? = null
+    private var contacts: List<Contact>,
+    private val onItemClick: (Contact) -> Unit
 ) : RecyclerView.Adapter<ContactAdapter.ViewHolder>() {
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-        val name: TextView = view.findViewById(R.id.name)
-        val avatar: ImageView = view.findViewById(R.id.avatar)
-        val statusDot: View = view.findViewById(R.id.statusDot)
+        val avatarImage: ImageView = view.findViewById(R.id.avatarImage)
+        val nameText: TextView = view.findViewById(R.id.nameText)
+        val statusIndicator: View = view.findViewById(R.id.statusIndicator)
+        val statusText: TextView = view.findViewById(R.id.statusText)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -32,23 +31,38 @@ class ContactAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val contact = contacts[position]
         
-        holder.name.text = contact.name
-        holder.avatar.loadAvatar(contact.avatarUrl)
+        // 使用 nickname 而不是 username
+        holder.nameText.text = contact.nickname ?: contact.username
         
-        // 设置在线状态指示器
-        holder.statusDot.setBackgroundResource(
-            if (contact.isOnline) R.color.online_status 
-            else R.color.offline_status
-        )
-
-        holder.itemView.setOnClickListener { onItemClick(contact) }
-        onItemLongClick?.let { longClick ->
-            holder.itemView.setOnLongClickListener { 
-                longClick(contact)
-                true
+        // 设置头像和在线状态
+        holder.avatarImage.loadAvatar(contact.avatarUrl)
+        
+        // 设置在线状态
+        when (contact.onlineStatus) {
+            0 -> { // 离线
+                holder.statusIndicator.setBackgroundResource(R.drawable.status_indicator_offline)
+                holder.statusText.text = "离线"
             }
+            1 -> { // 在线
+                holder.statusIndicator.setBackgroundResource(R.drawable.status_indicator_online)
+                holder.statusText.text = "在线"
+            }
+            2 -> { // 忙碌
+                holder.statusIndicator.setBackgroundResource(R.drawable.status_indicator_busy)
+                holder.statusText.text = "忙碌"
+            }
+        }
+        
+        // 设置点击事件
+        holder.itemView.setOnClickListener {
+            onItemClick(contact)
         }
     }
 
     override fun getItemCount() = contacts.size
+
+    fun updateContacts(newContacts: List<Contact>) {
+        contacts = newContacts
+        notifyDataSetChanged()
+    }
 } 

@@ -21,6 +21,10 @@ sealed class WebSocketMessage {
 
     enum class Type {
         MESSAGE,
-        SESSION_UPDATE
+        SESSION_UPDATE,
+        FRIEND_REQUEST,
+        FRIEND_ACCEPTED,
+        FRIEND_DELETED,
+        STATUS_CHANGED
     }
 } 

@@ -68,7 +68,7 @@ class MomentsAdapter(
             .error(R.drawable.default_avatar)
             .into(holder.ivAvatar)
 
-        holder.tvUsername.text = moment.username
+        holder.tvUsername.text = if (!moment.userNickname.isNullOrEmpty()) moment.userNickname else moment.username
         holder.tvTimestamp.text = moment.createTime.format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
         holder.tvContent.text = moment.content
         

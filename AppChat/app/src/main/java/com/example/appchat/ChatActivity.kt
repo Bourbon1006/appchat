@@ -764,11 +764,11 @@ class ChatActivity : AppCompatActivity() {
             }
             "PRIVATE" -> {
                 val receiverId = intent.getLongExtra("receiver_id", -1)
-                val receiverName = intent.getStringExtra("receiver_name") ?: ""
+                val receiverName = intent.getStringExtra("receiver_name") ?: ""  // 这应该已经是 nickname
                 if (receiverId != -1L) {
                     currentReceiverId = receiverId
                     this.receiverName = receiverName
-                    supportActionBar?.title = receiverName  // 使用 supportActionBar 设置标题
+                    supportActionBar?.title = receiverName  // 使用 nickname 作为标题
                     setupPrivateChat(receiverId, receiverName)
                 } else {
                     handleInvalidChat()
@@ -885,5 +885,28 @@ class ChatActivity : AppCompatActivity() {
                 showDeleteConfirmDialog(selectedMessages)
             }
         }
+    }
+
+    private fun markMessagesAsRead() {
+        val sessionId = intent.getLongExtra("sessionId", -1)
+        if (sessionId != -1L) {
+            val userId = UserPreferences.getUserId(this)
+            lifecycleScope.launch {
+                try {
+                    val response = ApiClient.apiService.markMessagesAsRead(sessionId, userId)
+                    if (!response.isSuccessful) {
+                        Log.e("ChatActivity", "Failed to mark messages as read: ${response.code()}")
+                    }
+                } catch (e: Exception) {
+                    Log.e("ChatActivity", "Error marking messages as read", e)
+                }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 其他代码...
+        markMessagesAsRead()
     }
 }

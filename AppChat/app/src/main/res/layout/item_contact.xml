@@ -1,35 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:padding="12dp"
-    android:background="?attr/selectableItemBackground">
+    android:padding="8dp">
 
-    <FrameLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content">
-        
-        <ImageView
-            android:id="@+id/avatar"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:scaleType="centerCrop"/>
-
-        <View
-            android:id="@+id/statusDot"
-            android:layout_width="12dp"
-            android:layout_height="12dp"
-            android:layout_gravity="end|bottom"
-            android:background="@drawable/status_dot"/>
-    </FrameLayout>
+    <ImageView
+        android:id="@+id/avatarImage"
+        android:layout_width="50dp"
+        android:layout_height="50dp"
+        android:src="@drawable/default_avatar"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
 
     <TextView
-        android:id="@+id/name"
+        android:id="@+id/nameText"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
         android:layout_marginStart="16dp"
         android:textSize="16sp"
-        android:textColor="@color/text_primary"/>
+        android:textStyle="bold"
+        app:layout_constraintStart_toEndOf="@id/avatarImage"
+        app:layout_constraintTop_toTopOf="@id/avatarImage"
+        app:layout_constraintEnd_toStartOf="@id/statusIndicator" />
 
-</LinearLayout> 
+    <View
+        android:id="@+id/statusIndicator"
+        android:layout_width="12dp"
+        android:layout_height="12dp"
+        android:layout_marginEnd="8dp"
+        android:background="@drawable/status_indicator_offline"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="@id/nameText"
+        app:layout_constraintBottom_toBottomOf="@id/nameText" />
+
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="离线"
+        android:textSize="12sp"
+        android:textColor="#757575"
+        app:layout_constraintStart_toStartOf="@id/nameText"
+        app:layout_constraintTop_toBottomOf="@id/nameText" />
+
+</androidx.constraintlayout.widget.ConstraintLayout> 

@@ -15,7 +15,8 @@ data class Moment(
     val commentCount: Int,
     val isLiked: Boolean,
     val comments: List<MomentComment>,
-    val likeUsers: List<User>? = null
+    val likeUsers: List<User>? = null,
+    val userNickname: String? = null
 )
 
 data class MomentComment(

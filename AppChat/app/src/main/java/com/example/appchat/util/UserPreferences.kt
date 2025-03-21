@@ -9,6 +9,7 @@ object UserPreferences {
     private const val KEY_TOKEN = "token"
     private const val KEY_USERNAME = "username"
     private const val KEY_AVATAR_URL = "avatar_url"
+    private const val KEY_USER_NICKNAME = "user_nickname"
 
     fun saveUserData(context: Context, userId: Long, token: String, username: String) {
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -40,13 +41,25 @@ object UserPreferences {
         return prefs.getString(KEY_AVATAR_URL, null)
     }
 
-    fun saveAvatarUrl(context: Context, url: String) {
+    fun setAvatarUrl(context: Context, url: String?) {
+        val fixedUrl = url?.replace("//api", "/api")
+        
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_AVATAR_URL, url).apply()
+        prefs.edit().putString(KEY_AVATAR_URL, fixedUrl).apply()
     }
 
     fun clearUserData(context: Context) {
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
+    }
+
+    fun saveUserNickname(context: Context, nickname: String?) {
+        val sharedPreferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        sharedPreferences.edit().putString(KEY_USER_NICKNAME, nickname).apply()
+    }
+
+    fun getUserNickname(context: Context): String? {
+        val sharedPreferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        return sharedPreferences.getString(KEY_USER_NICKNAME, null)
     }
 } 

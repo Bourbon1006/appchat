@@ -10,6 +10,7 @@ data class ChatMessage(
     val content: String,
     val senderId: Long,
     val senderName: String,
+    val senderNickname: String? = null,
     val receiverId: Long? = null,
     val receiverName: String? = null,
     val groupId: Long? = null,
