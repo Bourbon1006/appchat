@@ -12,7 +12,8 @@ import java.time.LocalDateTime
 @RestController
 @RequestMapping("/api/friends")
 class FriendRequestController(
-    private val friendRequestService: FriendRequestService
+    private val friendRequestService: FriendRequestService,
+    private val webSocketHandler: ChatWebSocketHandler
 ) {
     
     data class FriendRequestDTO(
@@ -55,7 +56,7 @@ class FriendRequestController(
     ): ResponseEntity<Unit> {
         return try {
             println("📝 收到好友请求处理: requestId=$requestId, accept=$accept")
-            
+
             val request = friendRequestService.getFriendRequest(requestId)
             if (request == null) {
                 println("❌ 未找到好友请求: $requestId")
@@ -71,7 +72,7 @@ class FriendRequestController(
             println("✅ 好友请求处理成功: ${updatedRequest.status}")
             
             // 通知相关用户
-            // webSocketHandler.notifyFriendRequestResult(updatedRequest)
+            webSocketHandler.notifyFriendRequestResult(updatedRequest)
             
             ResponseEntity.ok().build()
         } catch (e: Exception) {
@@ -82,11 +83,24 @@ class FriendRequestController(
     }
 
     @GetMapping("/pending/{userId}")
-    fun getPendingRequests(@PathVariable userId: Long): ResponseEntity<List<FriendRequestDTO>> {
+    fun getPendingRequests(@PathVariable userId: Long): ResponseEntity<List<UserDTO>> {
         return try {
             val requests = friendRequestService.getPendingRequests(userId)
-            ResponseEntity.ok(requests.map { it.toDTO() })
+            // 转换为发送者的完整 UserDTO 列表，包含 requestId
+            val senderDTOs = requests.map { request -> 
+                UserDTO(
+                    id = request.sender.id,
+                    username = request.sender.username,
+                    nickname = request.sender.nickname,
+                    avatarUrl = request.sender.avatarUrl,
+                    onlineStatus = request.sender.onlineStatus,
+                    isAdmin = false,
+                    requestId = request.id  // 添加 requestId
+                )
+            }
+            ResponseEntity.ok(senderDTOs)
         } catch (e: Exception) {
+            e.printStackTrace()
             ResponseEntity.badRequest().build()
         }
     }

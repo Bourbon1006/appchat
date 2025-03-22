@@ -22,6 +22,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import androidx.lifecycle.LifecycleOwner
+import com.bumptech.glide.load.engine.DiskCacheStrategy
 
 class MessageSessionAdapter(
     private val onItemClick: (MessageSession) -> Unit,
@@ -50,20 +51,38 @@ class MessageSessionAdapter(
         val session = sessions[position]
         println("📱 Binding session: partnerId=${session.partnerId}, unreadCount=${session.unreadCount}")
         
-        // 设置头像
-        if (session.partnerAvatar != null) {
-            Glide.with(holder.itemView.context)
-                .load("${holder.itemView.context.getString(R.string.server_url_format).format(
-                    holder.itemView.context.getString(R.string.server_ip),
-                    holder.itemView.context.getString(R.string.server_port)
-                )}${session.partnerAvatar}")
-                .apply(RequestOptions.circleCropTransform())
-                .placeholder(R.drawable.default_avatar)
-                .error(R.drawable.default_avatar)
-                .into(holder.avatar)
-        } else {
-            holder.avatar.setImageResource(R.drawable.default_avatar)
+        // 构建基础URL
+        val baseUrl = holder.itemView.context.getString(
+            R.string.server_url_format,
+            holder.itemView.context.getString(R.string.server_ip),
+            holder.itemView.context.getString(R.string.server_port)
+        )
+        
+        // 根据会话类型构建头像URL
+        val avatarUrl = when (session.type.uppercase()) {
+            "GROUP" -> "$baseUrl/api/groups/${session.partnerId}/avatar"
+            else -> "$baseUrl/api/users/${session.partnerId}/avatar"
         }
+        
+        // 加载头像
+        Glide.with(holder.itemView.context)
+            .load(avatarUrl)
+            .skipMemoryCache(true)
+            .diskCacheStrategy(DiskCacheStrategy.NONE)
+            .circleCrop()
+            .placeholder(
+                if (session.type.uppercase() == "GROUP") 
+                    R.drawable.default_group_avatar 
+                else 
+                    R.drawable.default_avatar
+            )
+            .error(
+                if (session.type.uppercase() == "GROUP") 
+                    R.drawable.default_group_avatar 
+                else 
+                    R.drawable.default_avatar
+            )
+            .into(holder.avatar)
 
         // 设置名称 - 确保使用 partnerName，它应该已经是 nickname
         holder.name.text = session.partnerName  // partnerName 应该已经是 nickname

@@ -1,6 +1,5 @@
-package com.example.appchat
+package com.example.appchat.activity
 
-import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.os.Environment
@@ -13,10 +12,7 @@ import com.google.android.gms.nearby.connection.*
 import java.io.File
 import android.net.Uri
 import android.provider.MediaStore
-import android.content.ContentResolver
-import android.webkit.MimeTypeMap
 import java.io.FileOutputStream
-import java.io.InputStream
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.app.ActivityCompat

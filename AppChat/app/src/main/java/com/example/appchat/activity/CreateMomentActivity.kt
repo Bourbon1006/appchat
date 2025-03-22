@@ -7,11 +7,13 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.bumptech.glide.Glide
 import com.example.appchat.api.ApiClient
 import com.example.appchat.api.CreateMomentRequest
 import com.example.appchat.databinding.ActivityCreateMomentBinding
 import com.example.appchat.util.UserPreferences
+import com.example.appchat.util.FileUtil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -76,47 +78,54 @@ class CreateMomentActivity : AppCompatActivity() {
         binding.btnPublish.isEnabled = false
         val userId = UserPreferences.getUserId(this)
 
-        CoroutineScope(Dispatchers.IO).launch {
+        lifecycleScope.launch {
             try {
                 var imageUrl: String? = null
                 
                 // 如果选择了图片，先上传图片
                 selectedImageUri?.let { uri ->
-                    val file = File(getRealPathFromUri(uri))
+                    // 使用 FileUtil 处理文件
+                    val file = FileUtil.getFileFromUri(this@CreateMomentActivity, uri)
+                    if (file == null) {
+                        Toast.makeText(this@CreateMomentActivity, "文件处理失败", Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+
                     val requestFile = file.asRequestBody("image/*".toMediaTypeOrNull())
                     val filePart = MultipartBody.Part.createFormData("file", file.name, requestFile)
                     
                     val response = ApiClient.apiService.uploadFile(filePart)
-                    imageUrl = response.body()?.url
+                    if (response.isSuccessful) {
+                        response.body()?.let { fileResponse ->
+                            imageUrl = fileResponse.url
+                        }
+                    } else {
+                        Toast.makeText(this@CreateMomentActivity, "图片上传失败", Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+
+                    // 删除临时文件
+                    file.delete()
                 }
 
                 // 发布动态
                 val request = CreateMomentRequest(content, imageUrl)
-                ApiClient.apiService.createMoment(userId, request)
+                val response = ApiClient.apiService.createMoment(userId, request)
                 
-                runOnUiThread {
+                if (response.isSuccessful) {
                     Toast.makeText(this@CreateMomentActivity, "发布成功", Toast.LENGTH_SHORT).show()
                     setResult(Activity.RESULT_OK)
                     finish()
+                } else {
+                    Toast.makeText(this@CreateMomentActivity, "发布失败", Toast.LENGTH_SHORT).show()
+                    binding.btnPublish.isEnabled = true
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-                runOnUiThread {
-                    binding.btnPublish.isEnabled = true
-                    Toast.makeText(this@CreateMomentActivity, "发布失败: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
+                binding.btnPublish.isEnabled = true
+                Toast.makeText(this@CreateMomentActivity, "发布失败: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
-    }
-
-    private fun getRealPathFromUri(uri: Uri): String {
-        val projection = arrayOf(MediaStore.Images.Media.DATA)
-        val cursor = contentResolver.query(uri, projection, null, null, null)
-        val columnIndex = cursor?.getColumnIndexOrThrow(MediaStore.Images.Media.DATA)
-        cursor?.moveToFirst()
-        val path = cursor?.getString(columnIndex ?: 0) ?: ""
-        cursor?.close()
-        return path
     }
 
     companion object {

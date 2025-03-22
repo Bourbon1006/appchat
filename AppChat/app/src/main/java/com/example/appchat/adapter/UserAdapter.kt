@@ -46,15 +46,24 @@ class UserAdapter(
     class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val userName: TextView = itemView.findViewById(R.id.userName)
         private val userStatus: TextView = itemView.findViewById(R.id.userStatus)
+        private val statusIndicator: View = itemView.findViewById(R.id.statusIndicator)
 
         fun bind(user: UserDTO) {
             userName.text = user.username
-            userStatus.text = if (user.isOnline) "在线" else "离线"
+            userStatus.text = if (user.onlineStatus == 1) "在线" else "离线"
             userStatus.setTextColor(
                 itemView.context.getColor(
-                    if (user.isOnline) android.R.color.holo_green_dark
+                    if (user.onlineStatus == 1) android.R.color.holo_green_dark
                     else android.R.color.darker_gray
                 )
+            )
+            updateStatusIndicator(this, user)
+        }
+
+        private fun updateStatusIndicator(holder: ViewHolder, user: UserDTO) {
+            val isOnline = user.onlineStatus == 1
+            holder.statusIndicator.setBackgroundResource(
+                if (isOnline) R.drawable.status_online else R.drawable.status_offline
             )
         }
     }

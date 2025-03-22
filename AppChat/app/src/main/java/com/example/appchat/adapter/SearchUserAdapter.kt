@@ -5,6 +5,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.example.appchat.R
 import com.example.appchat.model.UserDTO
@@ -34,7 +35,13 @@ class SearchUserAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val user = users[position]
         holder.nameText.text = user.nickname ?: user.username
-        holder.statusText.text = if (user.isOnline) "在线" else "离线"
+        val statusColor = if (user.onlineStatus == 1) {
+            ContextCompat.getColor(holder.itemView.context, R.color.online)
+        } else {
+            ContextCompat.getColor(holder.itemView.context, R.color.offline)
+        }
+        holder.statusText.setTextColor(statusColor)
+        holder.statusText.text = if (user.onlineStatus == 1) "在线" else "离线"
         holder.addFriendButton.setOnClickListener { onUserClick(user) }
     }
 

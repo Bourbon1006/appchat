@@ -1,5 +1,6 @@
 package com.example.appchat.api
 
+import GroupMember
 import com.example.appchat.model.*
 import com.example.appchat.model.CreateGroupRequest
 import retrofit2.Call
@@ -40,26 +41,26 @@ interface ApiService {
         @Body request: Map<String, Boolean>
     ): Call<FriendRequest>
     */
-    @GET("/api/groups/user/{userId}")
+    @GET("api/groups/user/{userId}")
     fun getUserGroups(@Path("userId") userId: Long): Call<List<Group>>
 
-    @POST("/api/groups")
+    @POST("api/groups")
     fun createGroup(@Body request: CreateGroupRequest): Call<Group>
 
     @GET("groups/{groupId}")
     fun getGroupById(@Path("groupId") groupId: Long): Call<Group>
 
-    @POST("/api/groups/{groupId}/members/{userId}")
-    fun addGroupMember(
+    @POST("api/groups/{groupId}/members/{userId}")
+    suspend fun addGroupMember(
         @Path("groupId") groupId: Long,
         @Path("userId") userId: Long
-    ): Call<Group>
+    ): Response<GroupMember>
 
-    @DELETE("/api/groups/{groupId}/members/{userId}")
-    fun removeGroupMember(
+    @DELETE("api/groups/{groupId}/members/{memberId}")
+    suspend fun removeGroupMember(
         @Path("groupId") groupId: Long,
-        @Path("userId") userId: Long
-    ): Call<Group>
+        @Path("memberId") memberId: Long
+    ): Response<Void>
 
     @PUT("groups/{groupId}")
     fun updateGroup(@Path("groupId") groupId: Long, @Body group: Group): Call<Group>
@@ -113,10 +114,10 @@ interface ApiService {
 
     @Multipart
     @POST("api/users/{userId}/avatar")
-    fun uploadAvatar(
+    suspend fun uploadAvatar(
         @Path("userId") userId: Long,
         @Part avatar: MultipartBody.Part
-    ): Call<UserDTO>
+    ): Response<ResponseBody>
 
     @GET("api/users/{userId}/avatar")
     fun getUserAvatar(@Path("userId") userId: Long): Call<ResponseBody>
@@ -240,6 +241,48 @@ interface ApiService {
     suspend fun markMessagesAsRead(
         @Query("sessionId") sessionId: Long,
         @Query("userId") userId: Long
+    ): Response<Unit>
+
+    @POST("api/groups/{groupId}/leave")
+    suspend fun leaveGroup(
+        @Path("groupId") groupId: Long,
+        @Query("userId") userId: Long
+    ): Response<Void>
+
+    @GET("api/groups/{groupId}")
+    suspend fun getGroupDetails(@Path("groupId") groupId: Long): Response<Group>
+
+    @GET("api/groups/{groupId}/members")
+    suspend fun getGroupMembers(@Path("groupId") groupId: Long): Response<List<UserDTO>>
+
+    @PUT("api/groups/{groupId}/name")
+    suspend fun updateGroupName(
+        @Path("groupId") groupId: Long, 
+        @Query("name") newName: String
+    ): Response<Group>
+
+    @Multipart
+    @POST("api/groups/{groupId}/avatar")
+    suspend fun uploadGroupAvatar(
+        @Path("groupId") groupId: Long,
+        @Part avatar: MultipartBody.Part
+    ): Response<ResponseBody>
+
+    @GET("api/friends/pending/{userId}")
+    suspend fun getFriendRequests(
+        @Path("userId") userId: Long
+    ): Response<List<UserDTO>>
+
+    @POST("api/friends/handle")
+    suspend fun acceptFriendRequest(
+        @Query("requestId") requestId: Long,
+        @Query("accept") accept: Boolean = true
+    ): Response<Unit>
+
+    @POST("api/friends/handle")
+    suspend fun rejectFriendRequest(
+        @Query("requestId") requestId: Long,
+        @Query("accept") accept: Boolean = false
     ): Response<Unit>
 }
 

@@ -1,6 +1,7 @@
 package org.example.appchathandler.controller
 
 import org.example.appchathandler.dto.FileDTO
+import org.example.appchathandler.dto.FileUploadResponse
 import org.example.appchathandler.service.FileService
 import org.slf4j.LoggerFactory
 import org.springframework.core.io.FileSystemResource
@@ -19,8 +20,7 @@ import org.springframework.beans.factory.annotation.Value
 @RestController
 @RequestMapping("/api/files")
 class FileController(
-    private val fileService: FileService,
-    @Value("\${file.upload.dir}") private val uploadDir: String
+    private val fileService: FileService
 ) {
     private val logger = LoggerFactory.getLogger(FileController::class.java)
     
@@ -30,18 +30,15 @@ class FileController(
     )
     
     @PostMapping("/upload")
-    fun uploadFile(
-        @RequestParam("file") file: MultipartFile
-    ): ResponseEntity<FileDTO> {
+    fun uploadFile(@RequestParam("file") file: MultipartFile): ResponseEntity<FileUploadResponse> {
         return try {
-            println("⭐ Received file upload request: ${file.originalFilename}, size: ${file.size}")
-            val fileDTO = fileService.saveFile(file)
-            println("✅ File uploaded successfully: ${fileDTO.url}")
-            ResponseEntity.ok(fileDTO)
+            val response = fileService.saveFile(file)
+            println("✅ File uploaded: ${response.fileName}")
+            ResponseEntity.ok(response)
         } catch (e: Exception) {
-            e.printStackTrace()
             println("❌ File upload failed: ${e.message}")
-            ResponseEntity.internalServerError().build()
+            e.printStackTrace()
+            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
         }
     }
     
@@ -104,25 +101,25 @@ class FileController(
     fun getFile(@PathVariable filename: String): ResponseEntity<Resource> {
         return try {
             val file = fileService.getFile(filename)
-            println("✅ Serving file: ${file.absolutePath}")
+            val resource = FileSystemResource(file)
             
-            // 根据文件扩展名设置正确的 Content-Type
-            val contentType = when (file.extension.lowercase()) {
-                "mp4" -> MediaType.parseMediaType("video/mp4")
-                "jpg", "jpeg" -> MediaType.IMAGE_JPEG
-                "png" -> MediaType.IMAGE_PNG
-                "gif" -> MediaType.IMAGE_GIF
-                "pdf" -> MediaType.APPLICATION_PDF
-                else -> MediaType.APPLICATION_OCTET_STREAM
+            // 设置正确的 Content-Type
+            val contentType = when {
+                filename.endsWith(".jpg", true) || 
+                filename.endsWith(".jpeg", true) -> "image/jpeg"
+                filename.endsWith(".png", true) -> "image/png"
+                filename.endsWith(".gif", true) -> "image/gif"
+                else -> "application/octet-stream"
             }
-
+            
+            println("✅ Serving file: $filename with type: $contentType")
+            
             ResponseEntity.ok()
-                .contentType(contentType)
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"${file.name}\"")
-                .body(FileSystemResource(file))
+                .contentType(MediaType.parseMediaType(contentType))
+                .body(resource)
         } catch (e: Exception) {
-            e.printStackTrace()
             println("❌ Failed to serve file: ${e.message}")
+            e.printStackTrace()
             ResponseEntity.notFound().build()
         }
     }

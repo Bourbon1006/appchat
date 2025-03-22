@@ -97,37 +97,50 @@ class UserController(
         val avatarFile = File(avatarDirectory, "$userId.jpg")
         
         if (!avatarFile.exists()) {
-            try {
-                // 创建一个内存中的默认头像
-                val image = BufferedImage(200, 200, BufferedImage.TYPE_INT_RGB)
-                val g2d = image.createGraphics()
-                
-                g2d.color = Color(200, 200, 200)
-                g2d.fillRect(0, 0, 200, 200)
-                
-                g2d.color = Color(150, 150, 150)
-                g2d.fillOval(50, 50, 100, 100)
-                
-                g2d.dispose()
-                
-                // 转换为ByteArrayResource
-                val baos = ByteArrayOutputStream()
-                ImageIO.write(image, "jpg", baos)
-                val imageBytes = baos.toByteArray()
-                
+            // 使用预设的默认头像文件
+            val defaultAvatarFile = File(avatarDirectory, "default.jpg")
+            
+            if (defaultAvatarFile.exists()) {
+                val resource = FileSystemResource(defaultAvatarFile)
                 return ResponseEntity.ok()
                     .contentType(MediaType.IMAGE_JPEG)
-                    .body(ByteArrayResource(imageBytes))
-            } catch (e: Exception) {
-                println("❌ Failed to create default avatar: ${e.message}")
-                return ResponseEntity.notFound().build()
+                    .body(resource)
+            } else {
+                // 如果默认头像文件也不存在，才回退到生成头像
+                println("⚠️ Default avatar file not found, generating one instead")
+                try {
+                    // 创建一个内存中的默认头像
+                    val image = BufferedImage(200, 200, BufferedImage.TYPE_INT_RGB)
+                    val g2d = image.createGraphics()
+                    
+                    g2d.color = Color(200, 200, 200)
+                    g2d.fillRect(0, 0, 200, 200)
+                    
+                    g2d.color = Color(150, 150, 150)
+                    g2d.fillOval(50, 50, 100, 100)
+                    
+                    g2d.dispose()
+                    
+                    // 转换为ByteArrayResource
+                    val baos = ByteArrayOutputStream()
+                    ImageIO.write(image, "jpg", baos)
+                    val imageBytes = baos.toByteArray()
+                    
+                    return ResponseEntity.ok()
+                        .contentType(MediaType.IMAGE_JPEG)
+                        .body(ByteArrayResource(imageBytes))
+                } catch (e: Exception) {
+                    println("❌ Failed to create default avatar: ${e.message}")
+                    return ResponseEntity.notFound().build()
+                }
             }
         }
-
-        println("✅ Serving avatar from: ${avatarFile.absolutePath}")
+        
+        // 返回用户自定义头像
+        val resource = FileSystemResource(avatarFile)
         return ResponseEntity.ok()
             .contentType(MediaType.IMAGE_JPEG)
-            .body(FileSystemResource(avatarFile))
+            .body(resource)
     }
 
     @PostMapping("/{userId}/avatar")

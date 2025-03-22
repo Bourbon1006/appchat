@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_add_members"
+        android:title="添加群成员"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_leave_group"
+        android:title="退出群聊"
+        app:showAsAction="never" />
+</menu> 

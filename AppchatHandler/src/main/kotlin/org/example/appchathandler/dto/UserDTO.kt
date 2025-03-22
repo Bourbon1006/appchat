@@ -7,7 +7,9 @@ data class UserDTO(
     val username: String,
     val nickname: String?,
     val avatarUrl: String?,
-    val onlineStatus: Int = 0
+    val onlineStatus: Int? = 0,
+    val isAdmin: Boolean? = false,
+    val requestId: Long? = null
 )
 
 fun User.toDTO() = UserDTO(

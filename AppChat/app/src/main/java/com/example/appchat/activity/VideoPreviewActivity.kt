@@ -1,12 +1,12 @@
-package com.example.appchat
+package com.example.appchat.activity
 
-import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
 import android.widget.MediaController
 import android.widget.Toast
 import android.widget.VideoView
 import androidx.appcompat.app.AppCompatActivity
+import com.example.appchat.R
 
 class VideoPreviewActivity : AppCompatActivity() {
     private lateinit var videoView: VideoView

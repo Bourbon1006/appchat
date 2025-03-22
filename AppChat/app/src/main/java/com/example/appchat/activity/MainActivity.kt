@@ -1,70 +1,26 @@
-package com.example.appchat
+package com.example.appchat.activity
 
 import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
-import android.view.View
 import android.view.inputmethod.EditorInfo
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.example.appchat.adapter.MessageAdapter
-import com.example.appchat.adapter.UserAdapter
-import com.example.appchat.adapter.ContactAdapter
 import com.example.appchat.adapter.SearchUserAdapter
-import com.example.appchat.adapter.ContactSelectionAdapter
-import com.example.appchat.adapter.GroupAdapter
-import com.example.appchat.adapter.GroupMemberAdapter
 import com.example.appchat.api.ApiClient
-import com.example.appchat.api.LocalDateTimeAdapter
-import com.example.appchat.model.ChatMessage
-import com.example.appchat.model.MessageType
-import com.example.appchat.model.User
 import com.example.appchat.util.UserPreferences
-import com.google.gson.Gson
-import com.google.gson.GsonBuilder
-import com.google.gson.TypeAdapter
-import com.google.gson.stream.JsonReader
-import com.google.gson.stream.JsonWriter
-import okhttp3.*
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
-import java.util.concurrent.TimeUnit
-import java.time.LocalDateTime
-import com.google.android.material.bottomnavigation.BottomNavigationView
-import com.example.appchat.model.FriendRequest
-import com.example.appchat.model.WebSocketMessage
-import com.example.appchat.model.Group
-import com.example.appchat.model.CreateGroupRequest
-import android.net.Uri
-import android.provider.MediaStore
-import android.app.Activity
-import okhttp3.MultipartBody
-import okhttp3.RequestBody
-import com.example.appchat.model.FileDTO
-import android.Manifest
-import android.content.pm.PackageManager
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import android.content.ContentResolver
-import android.provider.OpenableColumns
-import java.io.File
-import java.io.InputStream
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.RequestBody.Companion.asRequestBody
-import android.os.Build
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.result.ActivityResultLauncher
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
-import com.example.appchat.adapter.SearchResultAdapter
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
-import com.example.appchat.model.UpdateUserRequest
 import com.example.appchat.model.UserDTO
 import android.os.Handler
 import android.os.Looper
@@ -72,29 +28,32 @@ import com.bumptech.glide.load.engine.DiskCacheStrategy
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.IntentFilter
-import android.content.Context.RECEIVER_NOT_EXPORTED
 import android.widget.*
 import com.example.appchat.fragment.ContactsFragment
 import com.example.appchat.fragment.MessageDisplayFragment
 import com.example.appchat.websocket.WebSocketManager
 import androidx.fragment.app.Fragment
 import org.json.JSONObject
-import com.example.appchat.databinding.DialogContactsBinding
-import com.example.appchat.model.Contact
-import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
 import com.example.appchat.api.RetrofitClient
 import android.util.Log
+import com.example.appchat.R
 import com.example.appchat.databinding.ActivityMainBinding
 import com.example.appchat.fragment.MomentsFragment
 import kotlinx.coroutines.Dispatchers
 import com.example.appchat.fragment.MeFragment
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.coroutineScope
 
 class MainActivity : AppCompatActivity() {
-    internal lateinit var binding: ActivityMainBinding
+    // 将 binding 改为 internal，这样同包的类可以访问
+    private var _binding: ActivityMainBinding? = null
+    internal val binding: ActivityMainBinding
+        get() = _binding!!
+
+    private var currentUserId: Long = -1
     private lateinit var toolbar: Toolbar
-    private var userId: Long = -1L
     private lateinit var deleteButton: ImageButton
     private var deleteCallback: (() -> Unit)? = null
     private val apiService = ApiClient.apiService
@@ -104,47 +63,80 @@ class MainActivity : AppCompatActivity() {
         updateContactsBadge()
     }
 
+    private var avatarRefreshReceiver: BroadcastReceiver? = null
+    private var isReceiverRegistered = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 在加载布局之前切换回正常主题
+        setTheme(R.style.Theme_AppChat)
+        
         super.onCreate(savedInstanceState)
-        
-        binding = ActivityMainBinding.inflate(layoutInflater)
+        _binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
-        // 初始化userId
-        userId = UserPreferences.getUserId(this)
-
-        setupToolbar()
-        setupBottomNavigation()
-        setupAvatarRefreshReceiver()
-
-        // 注册 EventBus
-        EventBus.getDefault().register(this)
-
-        // 确保 WebSocket 连接
-        if (!WebSocketManager.isConnected()) {
-            val serverUrl = ApiClient.BASE_URL
-            WebSocketManager.init(serverUrl, userId)
-        }
-
-        // 注册待处理请求数量监听器
-        WebSocketManager.addPendingRequestCountListener(pendingRequestCountListener)
         
-        // 注册好友请求监听器，用于实时更新角标
-        WebSocketManager.addFriendRequestListener { request ->
-            if (request.sender != null) {
-                pendingRequestCount++
-                updateContactsBadge()
+        // 获取当前用户ID
+        currentUserId = UserPreferences.getUserId(this)
+        
+        // 验证用户ID
+        if (currentUserId <= 0) {
+            println("❌ Invalid userId: $currentUserId")
+            Toast.makeText(this, "用户信息无效，请重新登录", Toast.LENGTH_SHORT).show()
+            startActivity(Intent(this, LoginActivity::class.java))
+            finish()
+            return
+        }
+        
+        // 设置底部导航栏
+        setupBottomNavigation()
+        
+        // 使用协程异步加载数据
+        lifecycleScope.launch {
+            try {
+                // 在后台加载数据
+                withContext(Dispatchers.IO) {
+                    // 预加载必要的数据
+                    preloadData()
+                }
+                
+                // 在主线程更新UI
+                withContext(Dispatchers.Main) {
+                    // 初始化其他UI组件
+                    setupUI()
+                    // 加载默认Fragment
+                    loadDefaultFragment()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                Toast.makeText(this@MainActivity, "加载数据失败", Toast.LENGTH_SHORT).show()
             }
         }
-        
-        // 注册好友请求结果监听器
-        WebSocketManager.addFriendRequestResultListener { _, _ ->
-            pendingRequestCount = maxOf(0, pendingRequestCount - 1)
-            updateContactsBadge()
+    }
+    
+    private suspend fun preloadData() {
+        coroutineScope {
+            launch { 
+                WebSocketManager.init(
+                    context = this@MainActivity,
+                    userId = currentUserId.toString()
+                )
+            }
+            // 其他预加载操作...
         }
-
-        // 初始加载待处理请求数量
-        loadPendingRequests()
+    }
+    
+    private fun setupUI() {
+        // 设置Toolbar
+        setSupportActionBar(binding.toolbar)
+        
+        // 初始化ViewPager或其他UI组件
+        // ...
+    }
+    
+    private fun loadDefaultFragment() {
+        // 加载默认Fragment
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.fragmentContainer, MessageDisplayFragment())
+            .commit()
     }
 
     private fun setupToolbar() {
@@ -215,44 +207,54 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupAvatarRefreshReceiver() {
-        val filter = IntentFilter("com.example.appchat.REFRESH_AVATAR")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(avatarRefreshReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(avatarRefreshReceiver, filter)
-        }
-    }
-
-    private val avatarRefreshReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == "com.example.appchat.REFRESH_AVATAR") {
-                refreshAvatar()
+        avatarRefreshReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action == "com.example.appchat.AVATAR_UPDATED") {
+                    // 刷新头像
+                    val toolbarAvatar = findViewById<ImageView>(R.id.toolbarAvatar)
+                    val avatarUrl = UserPreferences.getAvatarUrl(this@MainActivity)
+                    
+                    Glide.with(this@MainActivity)
+                        .load(avatarUrl)
+                        .apply(RequestOptions.circleCropTransform())
+                        .skipMemoryCache(true)
+                        .diskCacheStrategy(DiskCacheStrategy.NONE)
+                        .placeholder(R.drawable.default_avatar)
+                        .into(toolbarAvatar)
+                }
             }
         }
-    }
 
-    private fun refreshAvatar() {
-        val toolbarAvatar = findViewById<ImageView>(R.id.toolbarAvatar)
-        val avatarUrl = UserPreferences.getAvatarUrl(this)
-
-        Glide.with(this)
-            .load(avatarUrl)
-            .apply(RequestOptions.circleCropTransform())
-            .skipMemoryCache(true)
-            .diskCacheStrategy(DiskCacheStrategy.NONE)
-            .placeholder(R.drawable.default_avatar)
-            .error(R.drawable.default_avatar)
-            .into(toolbarAvatar)
+        // 注册广播接收器
+        try {
+            registerReceiver(
+                avatarRefreshReceiver,
+                IntentFilter("com.example.appchat.AVATAR_UPDATED"),
+                RECEIVER_NOT_EXPORTED
+            )
+            isReceiverRegistered = true
+        } catch (e: Exception) {
+            println("❌ Failed to register avatar refresh receiver: ${e.message}")
+        }
     }
 
     override fun onDestroy() {
+        try {
+            // 只有在接收器已注册的情况下才注销
+            if (isReceiverRegistered && avatarRefreshReceiver != null) {
+                unregisterReceiver(avatarRefreshReceiver)
+                isReceiverRegistered = false
+            }
+            
+            // 清理 WebSocket 监听器
+            WebSocketManager.removeFriendRequestListeners()
+            
+        } catch (e: Exception) {
+            println("❌ Error in onDestroy: ${e.message}")
+        }
+        
         super.onDestroy()
-        unregisterReceiver(avatarRefreshReceiver)
-        EventBus.getDefault().unregister(this)
-        WebSocketManager.removePendingRequestCountListener(pendingRequestCountListener)
-        // 移除其他监听器
-        WebSocketManager.removeFriendRequestListener { }
-        WebSocketManager.removeFriendRequestResultListener { _, _ -> }
+        _binding = null
     }
 
     @Subscribe(threadMode = ThreadMode.MAIN)
@@ -291,11 +293,13 @@ class MainActivity : AppCompatActivity() {
     private fun sendFriendRequest(receiverId: Long) {
         try {
             val userId = UserPreferences.getUserId(this)
-            val serverUrl = ApiClient.BASE_URL
             
             // 如果 WebSocket 未连接，先初始化
             if (!WebSocketManager.isConnected()) {
-                WebSocketManager.init(serverUrl, userId)
+                WebSocketManager.init(
+                    context = this,  // 传入 Context
+                    userId = userId.toString()  // 转换为 String
+                )
                 // 等待一会儿确保连接建立
                 Handler(Looper.getMainLooper()).postDelayed({
                     sendFriendRequestInternal(userId, receiverId)
@@ -305,7 +309,7 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            Toast.makeText(this, "发送好友请求失败: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "发送好友请求失败", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -462,20 +466,79 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    fun loadPendingRequests() {
+    private fun updatePendingRequestCount() {
+        println("⭐ Updating pending request count for user: $currentUserId")
         lifecycleScope.launch {
             try {
-                val response = ApiClient.apiService.getPendingRequests(userId)
+                val response = ApiClient.apiService.getPendingRequests(currentUserId)
                 if (response.isSuccessful) {
-                    response.body()?.let { requests ->
-                        pendingRequestCount = requests.size
-                        updateContactsBadge()
+                    val requests = response.body() ?: emptyList()
+                    println("✅ Found ${requests.size} pending requests")
+                    
+                    // 重要：不要使用runOnUiThread，因为lifecycleScope已经保证了在主线程回调
+                    // 存储计数以供其他地方使用
+                    pendingRequestCount = requests.size
+                    
+                    // 更新UI
+                    val badge = binding.bottomNavigation.getOrCreateBadge(R.id.navigation_contacts)
+                    if (requests.isNotEmpty()) {
+                        badge.isVisible = true
+                        badge.number = requests.size
+                        badge.backgroundColor = ContextCompat.getColor(this@MainActivity, R.color.red)
+                        println("📝 Updated badge: count=${requests.size}")
+                    } else {
+                        badge.isVisible = false
+                        println("📝 Hidden badge: no pending requests")
+                    }
+                    
+                    // 通知所有打开的 Fragment 更新它们的UI
+                    val fragment = supportFragmentManager.findFragmentById(R.id.fragmentContainer)
+                    if (fragment is ContactsFragment) {
+                        fragment.updatePendingRequestCountUI(requests.size)
                     }
                 }
             } catch (e: Exception) {
-                Log.e("MainActivity", "Error loading pending requests", e)
+                println("❌ Error updating pending requests: ${e.message}")
             }
         }
+    }
+
+    private fun updateFriendRequestBadge(count: Int) {
+        val badge = binding.bottomNavigation.getOrCreateBadge(R.id.navigation_contacts)
+        if (count > 0) {
+            badge.isVisible = true
+            badge.number = count
+        } else {
+            badge.isVisible = false
+        }
+    }
+
+    private fun setupWebSocket() {
+        WebSocketManager.init(
+            context = this,
+            userId = currentUserId.toString()
+        )
+    }
+
+    // 添加公共方法供 Fragment 调用
+    fun refreshPendingRequests() {
+        println("📝 MainActivity.refreshPendingRequests() called")
+        updatePendingRequestCount()
+    }
+
+    // 修复其他调用 WebSocketManager.init 的地方
+    private fun reconnectWebSocket() {
+        WebSocketManager.init(
+            context = this,
+            userId = currentUserId.toString()
+        )
+    }
+
+    private fun handleWebSocketReconnect(serverUrl: String, userId: Long) {
+        WebSocketManager.init(
+            context = this,
+            userId = userId.toString()
+        )
     }
 
     companion object {

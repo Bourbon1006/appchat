@@ -13,15 +13,12 @@ import org.springframework.web.socket.handler.TextWebSocketHandler
 import java.time.LocalDateTime
 import java.util.concurrent.ConcurrentHashMap
 import com.fasterxml.jackson.databind.JsonNode
-import org.example.appchathandler.dto.WebSocketMessageDTO
-import org.example.appchathandler.dto.MessageDTO
 import org.springframework.context.event.EventListener
 import org.example.appchathandler.event.SessionsUpdateEvent
 import org.example.appchathandler.event.FriendRequestEvent
 import org.json.JSONObject
-import org.example.appchathandler.dto.toDTO
-import org.example.appchathandler.dto.toStatusDTO
 import com.fasterxml.jackson.core.type.TypeReference
+import org.example.appchathandler.dto.*
 import org.example.appchathandler.entity.*
 import org.example.appchathandler.event.SessionUpdateEvent
 import org.example.appchathandler.service.FriendService
@@ -29,6 +26,7 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.example.appchathandler.event.UserStatusUpdateEvent
 import org.example.appchathandler.event.FriendRequestNotificationEvent
+import org.example.appchathandler.dto.GroupCreateRequest
 
 @Component
 class ChatWebSocketHandler(
@@ -101,14 +99,16 @@ class ChatWebSocketHandler(
                 val onlineUsers = userService.getOnlineUsers()
                     .filter { it.id != userId }
                     .map { onlineUser ->
-                        UserStatusDTO(
-                            id = onlineUser.id,
-                            username = onlineUser.username,
-                            nickname = onlineUser.nickname,
-                            avatarUrl = onlineUser.avatarUrl,
-                            onlineStatus = onlineUser.onlineStatus,
-                            isOnline = onlineUser.onlineStatus > 0
-                        )
+                        onlineUser.onlineStatus?.let {
+                            UserStatusDTO(
+                                id = onlineUser.id,
+                                username = onlineUser.username,
+                                nickname = onlineUser.nickname,
+                                avatarUrl = onlineUser.avatarUrl,
+                                onlineStatus = it,
+                                isOnline = onlineUser.onlineStatus > 0
+                            )
+                        }
                     }
                 
                 // 发送在线用户列表
@@ -245,30 +245,41 @@ class ChatWebSocketHandler(
         session: WebSocketSession
     ) {
         try {
-            val savedMessage = messageService.createMessage(
+            val message = messageService.createMessage(
                 content = content,
                 senderId = senderId,
                 groupId = groupId,
                 type = type,
                 fileUrl = fileUrl
             )
-            // 获取群组成员并发送消息
-            val group = groupService.getGroup(groupId)
-            group.members.forEach { member ->
-                sessions[member.id]?.sendMessage(TextMessage(objectMapper.writeValueAsString(
-                    WebSocketMessageDTO(
-                        type = "message",
-                        message = savedMessage.toDTO()
-                    )
-                )))
+            
+            // 获取群组所有成员ID并发送消息
+            val memberIds = getUsersInGroup(groupId)
+            
+            for (memberId in memberIds) {
+                val userSession = sessions[memberId]
+                if (userSession != null && userSession.isOpen) {
+                    val dto = messageService.convertToMessageDTO(message)
+                    userSession.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
+                        "type" to "message",
+                        "message" to dto
+                    ))))
+                }
             }
+            
+            // 发送响应给发送者
+            val responseDto = messageService.convertToMessageDTO(message)
+            session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
+                "type" to "messageSent",
+                "message" to responseDto
+            ))))
+            
         } catch (e: Exception) {
-            session.sendMessage(TextMessage(objectMapper.writeValueAsString(
-                WebSocketMessageDTO(
-                    type = "error",
-                    error = e.message
-                )
-            )))
+            logger.error("Error sending group message: ${e.message}", e)
+            session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
+                "type" to "error",
+                "error" to "Failed to send message: ${e.message}"
+            ))))
         }
     }
     private fun handlePrivateMessage(
@@ -315,26 +326,10 @@ class ChatWebSocketHandler(
     }
     private fun handleFriendRequest(senderId: Long, receiverId: Long, session: WebSocketSession) {
         try {
-            // 1. 保存好友请求到数据库
+            // 1. 保存好友请求到数据库（通过事件处理通知）
             val request = friendRequestService.sendFriendRequest(senderId, receiverId)
             
-            // 2. 如果接收者在线，立即推送
-            val receiverSession = sessions[receiverId]
-            if (receiverSession != null && receiverSession.isOpen) {
-                println("📬 Receiver is online, sending friend request immediately")
-                val message = mapOf(
-                    "type" to "FRIEND_REQUEST",
-                    "senderId" to request.sender.id,
-                    "senderName" to request.sender.username,
-                    "message" to "${request.sender.username} 请求添加您为好友",
-                    "requestId" to request.id
-                )
-                receiverSession.sendMessage(TextMessage(objectMapper.writeValueAsString(message)))
-            } else {
-                println("📫 Receiver is offline, request will be sent when they reconnect")
-            }
-
-            // 3. 通知发送者请求已发送
+            // 2. 只通知发送者请求已发送
             val responseMessage = mapOf(
                 "type" to "FRIEND_REQUEST_SENT",
                 "success" to true
@@ -359,9 +354,16 @@ class ChatWebSocketHandler(
         val creatorId = message["creatorId"]?.asLong() ?: 0
         val memberIds = message["memberIds"] as? List<Number> ?: emptyList()
         try {
-            val groupDto = groupService.createGroup(name, creatorId, memberIds.map { it.toLong() })
+            val groupDto = groupService.createGroup(
+                GroupCreateRequest(
+                    name = name,
+                    creatorId = creatorId,
+                    memberIds = memberIds.map { it.toLong() }
+                )
+            )
             // 通知所有群成员
-            groupDto.members.forEach { member ->
+            val groupMembers = groupService.getGroupMembers(groupDto.id)
+            for (member in groupMembers) {
                 sessions[member.id]?.sendMessage(TextMessage(objectMapper.writeValueAsString(
                     WebSocketMessageDTO(
                         type = "groupCreated",
@@ -440,8 +442,34 @@ class ChatWebSocketHandler(
 
     @EventListener
     fun handleFriendRequestEvent(event: FriendRequestEvent) {
-        println("🔔 Received FriendRequestEvent for request ${event.friendRequest.id} from ${event.friendRequest.sender.username} to ${event.friendRequest.receiver.username}")
-        sendFriendRequest(event.friendRequest)
+        val request = event.friendRequest
+        val receiverSession = sessions[request.receiver.id]
+        
+        if (receiverSession?.isOpen == true) {
+            try {
+                // 第一种格式的消息（详细信息）
+                val detailedMessage = mapOf(
+                    "type" to "friendRequest",
+                    "friendRequest" to request
+                )
+                receiverSession.sendMessage(TextMessage(objectMapper.writeValueAsString(detailedMessage)))
+                
+                // 删除第二种格式的消息，只保留一种
+                /*
+                // 第二种格式的消息（简化版）
+                val simpleMessage = mapOf(
+                    "type" to "FRIEND_REQUEST",
+                    "senderId" to request.sender.id,
+                    "senderName" to request.sender.username,
+                    "message" to "${request.sender.username} 请求添加您为好友",
+                    "requestId" to request.id
+                )
+                receiverSession.sendMessage(TextMessage(objectMapper.writeValueAsString(simpleMessage)))
+                */
+            } catch (e: Exception) {
+                logger.error("Failed to send friend request notification", e)
+            }
+        }
     }
     
     fun sendFriendRequest(request: FriendRequest) {
@@ -610,6 +638,74 @@ class ChatWebSocketHandler(
             } catch (e: Exception) {
                 logger.error("Failed to send friend request notification", e)
             }
+        }
+    }
+
+    private fun handleGroupChatMessage(message: Message, groupId: Long) {
+        val group = groupService.getGroupById(groupId)
+        
+        // 使用 groupService 获取群组成员
+        val memberIds = getUsersInGroup(groupId)
+        
+        // 向所有在线成员发送消息
+        for (memberId in memberIds) {
+            val userSession = sessions[memberId]
+            if (userSession != null && userSession.isOpen) {
+                val dto = messageService.convertToMessageDTO(message)
+                userSession.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
+                    "type" to "message",
+                    "message" to dto
+                ))))
+            }
+        }
+    }
+
+    private fun getUsersInGroup(groupId: Long): Set<Long> {
+        try {
+            val group = groupService.getGroupById(groupId)
+            
+            // 我们需要从GroupDTO中获取成员ID
+            // 这里可能需要调整，取决于您的GroupDTO是否包含成员列表
+            // 如果没有，您可能需要在GroupService中添加一个方法来获取群组成员
+            
+            // 临时解决方案：从groupService中查询
+            return groupService.getGroupMembers(groupId).map { it.id }.toSet()
+        } catch (e: Exception) {
+            logger.error("Error getting users in group: ${e.message}")
+            return emptySet()
+        }
+    }
+
+    private fun handleGroupMembers(session: WebSocketSession, payload: JsonNode) {
+        try {
+            val groupId = payload.get("groupId").asLong()
+            
+            // 获取群组成员
+            val members = groupService.getGroupMembers(groupId)
+            
+            // 转换为简单的成员列表
+            val memberList = members.map { member ->
+                mapOf(
+                    "id" to member.id,
+                    "username" to member.username,
+                    "nickname" to member.nickname,
+                    "avatarUrl" to member.avatarUrl
+                )
+            }
+            
+            // 发送群组成员列表
+            session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
+                "type" to "GROUP_MEMBERS",
+                "groupId" to groupId,
+                "members" to memberList
+            ))))
+            
+        } catch (e: Exception) {
+            logger.error("Error getting group members: ${e.message}", e)
+            session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
+                "type" to "error",
+                "error" to "Failed to get group members: ${e.message}"
+            ))))
         }
     }
 }

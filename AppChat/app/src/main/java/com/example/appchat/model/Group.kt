@@ -8,8 +8,9 @@ data class Group(
     val announcement: String?,
     val creator: UserDTO,
     val members: List<UserDTO>,
-    val avatar: String? = null,
-    val createdAt: LocalDateTime
+    val avatarUrl: String? = null,
+    val createdAt: LocalDateTime,
+    val memberCount: Int = 0
 )
 
 data class CreateGroupRequest(

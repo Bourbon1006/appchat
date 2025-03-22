@@ -135,7 +135,8 @@ class MessageService(
             Group(
                 id = group.id,
                 name = group.name,
-                creator = userRepository.findById(group.creator.id).orElse(null)
+                creator = userRepository.findById(group.creator.id).orElse(null),
+                owner = userRepository.findById(group.creator.id).orElse(null)
             ),
             startTime,
             endTime

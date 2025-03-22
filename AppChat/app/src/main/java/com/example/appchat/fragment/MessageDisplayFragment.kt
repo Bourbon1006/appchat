@@ -2,6 +2,7 @@ package com.example.appchat.fragment
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -11,9 +12,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-import com.bumptech.glide.Glide
-import com.example.appchat.ChatActivity
-import com.example.appchat.R
+import com.example.appchat.activity.ChatActivity
 import com.example.appchat.adapter.MessageSessionAdapter
 import com.example.appchat.api.ApiClient
 import com.example.appchat.databinding.FragmentMessageDisplayBinding
@@ -21,7 +20,6 @@ import com.example.appchat.model.ChatMessage
 import com.example.appchat.model.MessageSession
 import com.example.appchat.util.UserPreferences
 import com.example.appchat.websocket.WebSocketManager
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 class MessageDisplayFragment : Fragment() {
@@ -84,19 +82,28 @@ class MessageDisplayFragment : Fragment() {
     }
 
     private fun navigateToChat(session: MessageSession) {
+        // 记录当前点击的会话信息，用于调试
+        Log.d("MessageDisplayFragment", "Navigating to chat: type=${session.type}, partnerId=${session.partnerId}, name=${session.partnerName}")
+        
         startActivity(Intent(context, ChatActivity::class.java).apply {
             when (session.type?.uppercase() ?: "PRIVATE") {
                 "GROUP" -> {
                     putExtra("chat_type", "GROUP")
-                    putExtra("group_id", session.partnerId)
-                    putExtra("group_name", session.partnerName)
+                    putExtra("receiver_id", session.partnerId)  // 使用统一的 receiver_id
+                    putExtra("receiver_name", session.partnerName)
                 }
                 else -> {
                     putExtra("chat_type", "PRIVATE")
-                    putExtra("receiver_id", session.partnerId)
+                    putExtra("receiver_id", session.partnerId)  // 使用统一的 receiver_id
                     putExtra("receiver_name", session.partnerName)
                 }
             }
+            
+            // 打印日志确认参数
+            println("🚀 Starting ChatActivity with:")
+            println("   chat_type: ${getStringExtra("chat_type")}")
+            println("   receiver_id: ${getLongExtra("receiver_id", -1)}")
+            println("   receiver_name: ${getStringExtra("receiver_name")}")
         })
     }
 
@@ -132,9 +139,16 @@ class MessageDisplayFragment : Fragment() {
                 updateSessions(sessions)
             } catch (e: Exception) {
                 println("❌ Failed to load sessions: ${e.message}")
-                Toast.makeText(context, "加载会话列表失败", Toast.LENGTH_SHORT).show()
+                // 使用安全的方式显示Toast
+                activity?.let { activity ->
+                    if (!activity.isFinishing && isAdded) {
+                        Toast.makeText(activity, "加载会话列表失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
             } finally {
-                swipeRefreshLayout.isRefreshing = false
+                if (isAdded && view != null) {
+                    swipeRefreshLayout.isRefreshing = false
+                }
             }
         }
     }
@@ -157,6 +171,8 @@ class MessageDisplayFragment : Fragment() {
     }
 
     private fun updateSessionWithNewMessage(message: ChatMessage) {
+        if (!isAdded) return  // 如果Fragment已经分离，则直接返回
+        
         // 判断消息类型（私聊/群聊）
         val sessionId: Long = when {
             message.groupId != null -> message.groupId

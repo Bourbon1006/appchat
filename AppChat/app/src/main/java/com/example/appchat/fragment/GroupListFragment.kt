@@ -12,57 +12,69 @@ import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.example.appchat.ChatActivity
+import com.example.appchat.activity.ChatActivity
 import com.example.appchat.R
 import com.example.appchat.adapter.ContactSelectionAdapter
 import com.example.appchat.adapter.GroupAdapter
+import com.example.appchat.api.ApiClient
+import com.example.appchat.databinding.FragmentGroupListBinding
 import com.example.appchat.model.CreateGroupRequest
 import com.example.appchat.model.Group
 import com.example.appchat.model.UserDTO
-import com.example.appchat.api.ApiClient
 import com.example.appchat.util.UserPreferences
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
 
 class GroupListFragment : Fragment() {
-    private lateinit var recyclerView: RecyclerView
-    private lateinit var adapter: GroupAdapter
-    private lateinit var createGroupButton: Button
+    private var _binding: FragmentGroupListBinding? = null
+    private val binding get() = _binding!!
+    private lateinit var groupAdapter: GroupAdapter
 
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
-    ): View? {
-        val view = inflater.inflate(R.layout.fragment_group_list, container, false)
-        
-        recyclerView = view.findViewById(R.id.groupsList)
-        createGroupButton = view.findViewById(R.id.createGroupButton)
-        
+    ): View {
+        _binding = FragmentGroupListBinding.inflate(inflater, container, false)
+        return binding.root
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
         setupRecyclerView()
         setupCreateGroupButton()
         loadGroups()
-        
-        return view
+
+        // 设置下拉刷新
+        binding.swipeRefreshLayout.setOnRefreshListener {
+            loadGroups()
+        }
     }
 
     private fun setupRecyclerView() {
-        adapter = GroupAdapter { group ->
-            println("🚀 Starting group chat - GroupID: ${group.id}, Name: ${group.name}")
-            
-            startActivity(Intent(context, ChatActivity::class.java).apply {
-                putExtra("chat_type", "GROUP")
-                putExtra("group_id", group.id)
-                putExtra("group_name", group.name)
-            })
+        groupAdapter = GroupAdapter(
+            onItemClick = { group ->
+                // 处理群组点击事件
+                val intent = Intent(requireContext(), ChatActivity::class.java).apply {
+                    putExtra("receiver_id", group.id)
+                    putExtra("receiver_name", group.name)
+                    putExtra("chat_type", "GROUP")
+                }
+                startActivity(intent)
+            },
+            lifecycleOwner = viewLifecycleOwner,
+            context = requireContext()
+        )
+
+        binding.groupsRecyclerView.apply {
+            layoutManager = LinearLayoutManager(context)
+            adapter = groupAdapter
         }
-        recyclerView.layoutManager = LinearLayoutManager(requireContext())
-        recyclerView.adapter = adapter
     }
 
     private fun setupCreateGroupButton() {
-        createGroupButton.setOnClickListener {
+        binding.createGroupButton.setOnClickListener {
             showCreateGroupDialog()
         }
     }
@@ -136,22 +148,30 @@ class GroupListFragment : Fragment() {
         dialog.show()
     }
 
-    private fun loadGroups() {
-        ApiClient.apiService.getUserGroups(UserPreferences.getUserId(requireContext()))
-            .enqueue(object : Callback<List<Group>> {
-                override fun onResponse(call: Call<List<Group>>, response: Response<List<Group>>) {
-                    if (response.isSuccessful) {
-                        response.body()?.let { groups ->
-                            adapter.updateGroups(groups)
-                        }
-                    } else {
-                        Toast.makeText(context, "加载群组失败", Toast.LENGTH_SHORT).show()
+    fun loadGroups() {
+        val userId = UserPreferences.getUserId(requireContext())
+        
+        ApiClient.apiService.getUserGroups(userId).enqueue(object : Callback<List<Group>> {
+            override fun onResponse(call: Call<List<Group>>, response: Response<List<Group>>) {
+                if (response.isSuccessful) {
+                    response.body()?.let { groups ->
+                        groupAdapter.updateGroups(groups)
                     }
+                } else {
+                    Toast.makeText(context, "加载群组失败", Toast.LENGTH_SHORT).show()
                 }
+                binding.swipeRefreshLayout.isRefreshing = false
+            }
 
-                override fun onFailure(call: Call<List<Group>>, t: Throwable) {
-                    Toast.makeText(context, "网络错误", Toast.LENGTH_SHORT).show()
-                }
-            })
+            override fun onFailure(call: Call<List<Group>>, t: Throwable) {
+                Toast.makeText(context, "网络错误", Toast.LENGTH_SHORT).show()
+                binding.swipeRefreshLayout.isRefreshing = false
+            }
+        })
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        _binding = null
     }
 } 

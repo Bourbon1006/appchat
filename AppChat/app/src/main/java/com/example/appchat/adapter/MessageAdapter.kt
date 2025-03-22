@@ -6,13 +6,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
-import android.os.Build
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
-import android.view.GestureDetector
 import android.view.LayoutInflater
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.CheckBox
@@ -20,34 +17,20 @@ import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
-import androidx.core.content.FileProvider
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.request.RequestOptions
-import com.bumptech.glide.load.DataSource
-import com.bumptech.glide.load.engine.GlideException
-import com.bumptech.glide.request.RequestListener
-import com.bumptech.glide.request.target.Target
-import android.graphics.drawable.Drawable
-import com.example.appchat.ImagePreviewActivity
-import com.example.appchat.MainActivity
+import com.example.appchat.activity.ImagePreviewActivity
 import com.example.appchat.R
-import com.example.appchat.VideoPreviewActivity
+import com.example.appchat.activity.VideoPreviewActivity
 import com.example.appchat.db.ChatDatabase
 import com.example.appchat.model.ChatMessage
 import com.example.appchat.model.MessageType
-import com.example.appchat.util.CustomLongClickListener
 import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
-import android.media.MediaMetadataRetriever
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import android.media.MediaScannerConnection
-import com.example.appchat.api.ApiClient
 import com.example.appchat.util.UserPreferences
 
 class MessageAdapter(
@@ -296,60 +279,39 @@ class MessageAdapter(
         private val senderName: TextView = itemView.findViewById(R.id.senderName)
 
         fun bind(message: ChatMessage, previousMessage: ChatMessage?) {
-            // 构建基础 URL
-            val baseUrl = with(itemView.context) {
-                val ip = getString(R.string.server_ip)
-                val port = getString(R.string.server_port)
-                getString(R.string.server_url_format).format(ip, port)
-            }.trimEnd('/')
+            // 加载发送者头像
+            val baseUrl = itemView.context.getString(
+                R.string.server_url_format,
+                itemView.context.getString(R.string.server_ip),
+                itemView.context.getString(R.string.server_port)
+            )
+
+            // 根据消息类型构建头像URL
+            val avatarUrl = when (currentChatType) {
+                "GROUP" -> "$baseUrl/api/users/${message.senderId}/avatar"  // 群聊显示发送者头像
+                else -> "$baseUrl/api/users/${message.senderId}/avatar"     // 私聊显示对方头像
+            }
 
             // 加载头像
-            val avatarUrl = if (message.senderId == currentUserId) {
-                UserPreferences.getAvatarUrl(context)  // 修改为你的获取头像URL的方法
-            } else {
-                // 构建其他用户的头像URL
-                "$baseUrl/api/users/${message.senderId}/avatar"
-            }
+            Glide.with(itemView.context)
+                .load(avatarUrl)
+                .skipMemoryCache(true)
+                .diskCacheStrategy(DiskCacheStrategy.NONE)
+                .circleCrop()
+                .placeholder(R.drawable.default_avatar)
+                .error(R.drawable.default_avatar)
+                .into(avatarImage)
 
             // 始终设置用户名，不管头像是否加载
             if (message.senderId == currentUserId) {
                 // 对于自己发送的消息，使用缓存的昵称
-                val nickname = UserPreferences.getUserNickname(context)
+                val nickname = UserPreferences.getUserNickname(itemView.context)
                 senderName.text = if (!nickname.isNullOrEmpty()) nickname else message.senderName
             } else {
                 // 对于接收的消息，使用消息中的发送者名称
                 senderName.text = message.senderName
             }
             senderName.visibility = View.VISIBLE
-
-            Glide.with(context)
-                .load(avatarUrl)
-                .apply(RequestOptions.circleCropTransform())
-                .placeholder(R.drawable.default_avatar)
-                .error(R.drawable.default_avatar)
-                .listener(object : RequestListener<Drawable> {
-                    override fun onLoadFailed(
-                        e: GlideException?,
-                        p1: Any?,
-                        target: Target<Drawable>,
-                        isFirstResource: Boolean
-                    ): Boolean {
-                        senderName.visibility = View.VISIBLE
-                        return false
-                    }
-
-                    override fun onResourceReady(
-                        resource: Drawable,
-                        model: Any,
-                        target: Target<Drawable>,
-                        dataSource: DataSource,
-                        isFirstResource: Boolean
-                    ): Boolean {
-                        senderName.visibility = View.VISIBLE
-                        return false
-                    }
-                })
-                .into(avatarImage)
 
             // 处理消息内容
             when (message.type) {
@@ -362,7 +324,7 @@ class MessageAdapter(
 
             // 在群聊中显示发送者名称（除了自己发的消息）
             senderName.apply {
-                if (message.chatType == "GROUP" && message.senderId != currentUserId) {
+                if (currentChatType == "GROUP" && message.senderId != currentUserId) {
                     visibility = View.VISIBLE
                     text = if (!message.senderNickname.isNullOrEmpty()) message.senderNickname else message.senderName
                 } else {

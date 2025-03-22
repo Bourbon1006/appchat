@@ -1,7 +1,6 @@
-package com.example.appchat
+package com.example.appchat.activity
 
 import android.app.AlertDialog
-import android.content.ContentResolver
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -10,15 +9,9 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.inputmethod.EditorInfo
-import android.widget.EditText
-import android.widget.ImageButton
-import android.widget.TextView
-import android.widget.Toast
-import androidx.activity.addCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.widget.Toolbar
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -26,41 +19,46 @@ import com.example.appchat.adapter.MessageAdapter
 import com.example.appchat.adapter.SearchResultAdapter
 import com.example.appchat.api.ApiClient
 import com.example.appchat.model.ChatMessage
-import com.example.appchat.model.FileDTO
 import com.example.appchat.model.MessageType
 import com.example.appchat.util.UserPreferences
 import com.example.appchat.websocket.WebSocketManager
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
-import java.io.File
 import java.time.LocalDateTime
-import retrofit2.Callback
-import retrofit2.Response
-import retrofit2.Call
 import org.greenrobot.eventbus.EventBus
 import com.example.appchat.util.UserManager
 import com.example.appchat.api.RetrofitClient
+import android.content.BroadcastReceiver
+import android.content.Context
+import com.example.appchat.databinding.ActivityChatBinding
+import android.content.pm.PackageManager
+import android.widget.*
+import com.example.appchat.util.FileUtil
+import com.bumptech.glide.Glide
+import com.bumptech.glide.load.engine.DiskCacheStrategy
+import com.example.appchat.R
 
 class ChatActivity : AppCompatActivity() {
+    private lateinit var binding: ActivityChatBinding
     private lateinit var messagesList: RecyclerView
     private lateinit var messageInput: EditText
     private lateinit var sendButton: ImageButton
     private lateinit var attachButton: ImageButton
+    private lateinit var deleteButton: ImageButton
     private lateinit var adapter: MessageAdapter
     private var receiverId: Long = 0
     private var receiverName: String = ""
-    private var chatType: String = "private"
+    private var chatType: String = "PRIVATE"
     private var isMultiSelectMode = false
-    private lateinit var deleteButton: ImageButton
     private var currentChatType: String = "PRIVATE"
     private var currentReceiverId: Long = 0
     private var currentGroupId: Long = -1
     private var title: String = ""
-    private var partnerId: Long = -1
+    private var partnerId: Long = 0
+    private var currentUserId: Long = 0
+    private lateinit var baseUrl: String  // 添加 baseUrl 变量
 
     // ActivityResultLauncher for file picking
     private val filePickerLauncher: ActivityResultLauncher<String> = registerForActivityResult(
@@ -69,41 +67,70 @@ class ChatActivity : AppCompatActivity() {
         uri?.let { uploadFile(it) }
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_chat)
-
-        // 初始化基础视图
-        initViews()
-        setupRecyclerView()
-        setupSendButton()
-        setupAttachButton()
-        setupToolbar()
-        setupDeleteButton()
-        
-        // 设置聊天
-        setupChat()
-        
-        // 加载历史消息并设置 WebSocket
-        loadChatHistory()
-        setupWebSocket()
-
-        // 注册返回键回调
-        onBackPressedDispatcher.addCallback(this) {
-            if (isMultiSelectMode) {
-                exitMultiSelectMode()
-            } else {
+    // 在类定义中添加广播接收器
+    private val closeActivityReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val groupId = intent.getLongExtra("group_id", -1)
+            if (groupId == currentGroupId) {
                 finish()
             }
         }
     }
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityChatBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+        
+        // 初始化 baseUrl
+        baseUrl = getString(
+            R.string.server_url_format,
+            getString(R.string.server_ip),
+            getString(R.string.server_port)
+        )
+        
+        // 初始化所有视图组件
+        messagesList = binding.messagesList
+        messageInput = binding.messageInput
+        sendButton = binding.sendButton
+        attachButton = binding.attachButton
+        deleteButton = binding.deleteButton
+        
+        // 获取当前用户ID
+        currentUserId = UserPreferences.getUserId(this)
+        
+        // 从Intent获取聊天参数
+        chatType = intent.getStringExtra("chat_type") ?: "PRIVATE"
+        receiverId = intent.getLongExtra("receiver_id", -1)
+        receiverName = intent.getStringExtra("receiver_name") ?: "未知用户"
+        
+        if (receiverId <= 0) {
+            Toast.makeText(this, "无效的聊天对象ID", Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
+
+        // 初始化聊天
+        setupChat()
+        setupRecyclerView()
+        setupSendButton()
+        setupAttachButton()
+        setupDeleteButton()
+        loadChatHistory()
+        setupWebSocket()
+        
+        // 如果是私聊，加载对方头像
+        if (chatType == "PRIVATE") {
+            loadPartnerAvatar()
+        }
+    }
+
     private fun initViews() {
-        messagesList = findViewById(R.id.messagesList)
-        messageInput = findViewById(R.id.messageInput)
-        sendButton = findViewById(R.id.sendButton)
-        attachButton = findViewById(R.id.attachButton)
-        deleteButton = findViewById(R.id.deleteButton)
+        messagesList = binding.messagesList
+        messageInput = binding.messageInput
+        sendButton = binding.sendButton
+        attachButton = binding.attachButton
+        deleteButton = binding.deleteButton
     }
 
     private fun setupRecyclerView() {
@@ -182,59 +209,63 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun loadChatHistory() {
-        lifecycleScope.launch {
-            try {
-                val messages = when (currentChatType) {
-                    "GROUP" -> {
-                        println("📥 Loading group messages for group: $currentGroupId")
-                        val groupMessages = ApiClient.apiService.getGroupMessages(
-                            groupId = currentGroupId,
-                            userId = UserPreferences.getUserId(this@ChatActivity)  // 添加 userId 参数
-                        )
-                        groupMessages.map { message ->
-                            message.copy(
-                                groupId = currentGroupId,
-                                receiverId = null,
-                                receiverName = null,
-                                chatType = "GROUP"
-                            )
-                        }
+        val userId = UserPreferences.getUserId(this)
+        
+        when (chatType) {
+            "GROUP" -> {
+                println("📥 Loading group messages for group: $currentGroupId")
+                lifecycleScope.launch {
+                    try {
+                        val messages = ApiClient.apiService.getGroupMessages(currentGroupId, userId)
+                        adapter.setMessages(messages)
+                        messagesList.scrollToPosition(adapter.itemCount - 1)
+                    } catch (e: Exception) {
+                        println("❌ Failed to load group messages: ${e.message}")
+                        Toast.makeText(this@ChatActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
                     }
-                    else -> {
-                        println("📥 Loading private messages with user: $currentReceiverId")
-                        val currentUserId = UserPreferences.getUserId(this@ChatActivity)
+                }
+            }
+            else -> {
+                println("📥 Loading private messages with user: $currentReceiverId")
+                lifecycleScope.launch {
+                    try {
                         val privateMessages = ApiClient.apiService.getPrivateMessages(
-                            userId = currentUserId,
+                            userId = userId,
                             otherId = currentReceiverId
                         )
-                        privateMessages.map { message ->
+                        
+                        val mappedMessages = privateMessages.map { message ->
                             message.copy(
-                                receiverId = if (message.senderId == currentUserId) 
-                                    currentReceiverId else currentUserId,
+                                receiverId = if (message.senderId == userId) 
+                                    currentReceiverId else userId,
                                 chatType = "PRIVATE"
                             )
                         }
+                        
+                        // 更新UI
+                        adapter.setMessages(mappedMessages)
+                        messagesList.scrollToPosition(adapter.itemCount - 1)
+                    } catch (e: Exception) {
+                        println("❌ Failed to load private messages: ${e.message}")
+                        Toast.makeText(this@ChatActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
                     }
                 }
-                
-                // 更新UI
-                adapter.setMessages(messages)
-                messagesList.scrollToPosition(adapter.itemCount - 1)
-                
-            } catch (e: Exception) {
-                e.printStackTrace()
-                println("❌ Error loading chat history: ${e.message}")
-                Toast.makeText(this@ChatActivity, "加载消息失败", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
     private fun setupWebSocket() {
-        // 设置当前聊天的用户ID
+        val userId = UserPreferences.getUserId(this)
+        println("📱 Retrieved userId: $userId")
+        
+        // 设置当前聊天
         WebSocketManager.setCurrentChat(
-            userId = UserPreferences.getUserId(this),
-            partnerId = if (currentChatType == "GROUP") currentGroupId else currentReceiverId,
-            isGroup = currentChatType == "GROUP"
+            userId = userId,
+            partnerId = when (chatType) {
+                "GROUP" -> currentGroupId  // 使用 currentGroupId
+                else -> currentReceiverId
+            },
+            isGroup = (chatType == "GROUP")
         )
 
         WebSocketManager.addMessageListener { message ->
@@ -270,29 +301,36 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun showDeleteButton() {
-        deleteButton.visibility = View.VISIBLE
-        messageInput.visibility = View.GONE
-        sendButton.visibility = View.GONE
-        attachButton.visibility = View.GONE
+        // 显示删除按钮
+        binding.deleteButton.visibility = View.VISIBLE
+        
+        // 隐藏其他输入相关控件
+        binding.messageInput.visibility = View.GONE
+        binding.sendButton.visibility = View.GONE
+        binding.attachButton.visibility = View.GONE
     }
 
     private fun hideDeleteButton() {
-        deleteButton.visibility = View.GONE
+        // 隐藏删除按钮
+        binding.deleteButton.visibility = View.GONE
+        
+        // 显示其他输入相关控件
+        binding.messageInput.visibility = View.VISIBLE
+        binding.sendButton.visibility = View.VISIBLE
+        binding.attachButton.visibility = View.VISIBLE
     }
 
     private fun enterMultiSelectMode() {
         isMultiSelectMode = true
         adapter.enterMultiSelectMode()
-        showDeleteButton()
+        showDeleteButton()  // 显示删除按钮
         supportActionBar?.title = "已选择 0 条消息"
     }
 
     private fun exitMultiSelectMode() {
         isMultiSelectMode = false
         adapter.exitMultiSelectMode()
-        hideDeleteButton()
-        
-        // 恢复标题
+        hideDeleteButton()  // 隐藏删除按钮
         supportActionBar?.title = when (currentChatType) {
             "PRIVATE" -> receiverName
             "GROUP" -> "$receiverName (群聊)"
@@ -344,57 +382,37 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun uploadFile(uri: Uri) {
-        val file = File(getRealPathFromUri(uri))
-        val requestFile = file.asRequestBody("*/*".toMediaTypeOrNull())
-        val body = MultipartBody.Part.createFormData("file", file.name, requestFile)
-
-        lifecycleScope.launch(Dispatchers.IO) {
+        lifecycleScope.launch {
             try {
+                // 使用应用私有目录中的临时文件
+                val file = FileUtil.getFileFromUri(this@ChatActivity, uri)
+                if (file == null) {
+                    Toast.makeText(this@ChatActivity, "文件处理失败", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+
+                val requestFile = file.asRequestBody("multipart/form-data".toMediaTypeOrNull())
+                val body = MultipartBody.Part.createFormData("file", file.name, requestFile)
+
                 val response = ApiClient.apiService.uploadFile(body)
                 if (response.isSuccessful) {
                     response.body()?.let { fileResponse ->
-                        // 发送文件消息
-                        val message = UserPreferences.getUsername(this@ChatActivity)?.let {
-                            ChatMessage(
-                                id = null,
-                                senderId = UserPreferences.getUserId(this@ChatActivity),
-                                senderName = it,
-                                content = fileResponse.url,
-                                type = MessageType.FILE,
-                                receiverId = if (currentChatType == "PRIVATE") currentReceiverId else null,
-                                receiverName = if (currentChatType == "PRIVATE") title else null,
-                                groupId = if (currentChatType == "GROUP") currentGroupId else null,
-                                timestamp = LocalDateTime.now(),
-                                fileUrl = fileResponse.url,
-                                chatType = currentChatType
-                            )
-                        }
-
-                        // 使用 WebSocket 发送消息
-                        withContext(Dispatchers.Main) {
-                            message?.let {
-                                WebSocketManager.sendMessage(it,
-                                    onSuccess = {
-                                        adapter.addMessage(message)
-                                        messagesList.scrollToPosition(adapter.itemCount - 1)
-                                    },
-                                    onError = { error ->
-                                        Toast.makeText(this@ChatActivity, "发送失败: $error", Toast.LENGTH_SHORT).show()
-                                    }
-                                )
-                            }
-                        }
+                        // 发送包含文件URL的消息
+                        sendMessage(
+                            content = file.name,  // 使用原始文件名
+                            type = "FILE",
+                            fileUrl = fileResponse.url
+                        )
                     }
                 } else {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(this@ChatActivity, "文件上传失败", Toast.LENGTH_SHORT).show()
-                    }
+                    Toast.makeText(this@ChatActivity, "上传失败", Toast.LENGTH_SHORT).show()
                 }
+
+                // 删除临时文件
+                file.delete()
             } catch (e: Exception) {
                 e.printStackTrace()
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@ChatActivity, "文件上传失败: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
+                Toast.makeText(this@ChatActivity, "上传失败: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -435,6 +453,14 @@ class ChatActivity : AppCompatActivity() {
                 showDeleteFriendConfirmDialog()
                 true
             }
+            R.id.action_leave_group -> {
+                showLeaveGroupConfirmationDialog()
+                true
+            }
+            R.id.action_group_settings -> {
+                openGroupSettings()
+                true
+            }
             else -> super.onOptionsItemSelected(item)
         }
     }
@@ -461,6 +487,35 @@ class ChatActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun showLeaveGroupConfirmationDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("退出群聊")
+            .setMessage("确定要退出此群聊吗？")
+            .setPositiveButton("确定") { _, _ ->
+                leaveGroup()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun leaveGroup() {
+        val userId = UserPreferences.getUserId(this)
+        val groupId = intent.getLongExtra("group_id", -1)
+        
+        lifecycleScope.launch {
+            try {
+                val response = ApiClient.apiService.leaveGroup(groupId, userId)
+                if (response.isSuccessful) {
+                    Toast.makeText(this@ChatActivity, "已退出群聊", Toast.LENGTH_SHORT).show()
+                    finish()
+                } else {
+                    Toast.makeText(this@ChatActivity, "退出群聊失败", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this@ChatActivity, "网络错误", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     override fun onDestroy() {
         super.onDestroy()
@@ -470,6 +525,13 @@ class ChatActivity : AppCompatActivity() {
             partnerId = 0,
             isGroup = false
         )
+        
+        // 取消注册广播接收器
+        try {
+            unregisterReceiver(closeActivityReceiver)
+        } catch (e: IllegalArgumentException) {
+            // 忽略未注册的异常
+        }
     }
 
     private fun showImagePreview(fileUrl: String?) {
@@ -497,10 +559,29 @@ class ChatActivity : AppCompatActivity() {
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.chat_menu, menu)
-        // 只在私聊时显示删除好友选项
-        menu.findItem(R.id.action_delete_friend)?.isVisible = currentChatType == "PRIVATE"
+        // 根据聊天类型加载不同的菜单
+        val isGroup = chatType.equals("GROUP", ignoreCase = true)
+        
+        if (isGroup) {
+            // 加载群聊菜单 - 只有搜索和设置按钮
+            menuInflater.inflate(R.menu.chat_menu_group, menu)
+        } else {
+            // 加载私聊菜单 - 有搜索和删除好友选项
+            menuInflater.inflate(R.menu.chat_menu_private, menu)
+        }
+        
         return true
+    }
+
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        val isGroup = chatType == "GROUP"
+        Log.d("ChatActivity", "Preparing menu: chatType=$chatType, isGroup=$isGroup")
+        
+        menu.findItem(R.id.action_leave_group)?.isVisible = isGroup
+        menu.findItem(R.id.action_group_settings)?.isVisible = isGroup
+        menu.findItem(R.id.action_delete_friend)?.isVisible = !isGroup
+        
+        return super.onPrepareOptionsMenu(menu)
     }
 
     private fun showSearchMessagesDialog() {
@@ -542,57 +623,60 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun markSessionAsRead() {
+        // 确保使用正确的partnerId
+        val partnerId = when (currentChatType) {
+            "GROUP" -> currentReceiverId // 对于群聊，使用群ID
+            else -> currentReceiverId    // 对于私聊，使用接收者ID
+        }
+        
+        if (partnerId <= 0) {
+            println("⚠️ Skipping markSessionAsRead because partnerId is $partnerId")
+            return
+        }
+        
+        println("📝 Marking messages as read: userId=$currentUserId, partnerId=$partnerId")
+        
         lifecycleScope.launch {
             try {
-                val partnerId = when (currentChatType) {
-                    "GROUP" -> currentGroupId
-                    else -> currentReceiverId
-                }
-                println("🔍 Marking session as read - Type: $currentChatType, PartnerId: $partnerId")
-                
-                ApiClient.apiService.markSessionAsRead(
-                    userId = UserPreferences.getUserId(this@ChatActivity),
-                    partnerId = partnerId,
+                val response = ApiClient.apiService.markSessionAsRead(
+                    userId = currentUserId,
+                    partnerId = partnerId,  // 使用 partnerId 而不是 sessionId
                     type = currentChatType
-                ).let { response ->
-                    if (!response.isSuccessful) {
-                        println("⚠️ Failed to mark session as read: ${response.code()}")
-                    } else {
-                        println("✅ Successfully marked session as read")
-                    }
-                }
+                )
+                println("✅ markSessionAsRead API response: $response")
             } catch (e: Exception) {
-                println("❌ Error marking session as read: ${e.message}")
+                println("❌ Failed to mark messages as read: ${e.message}")
             }
         }
     }
 
-    private fun setupGroupChat(groupId: Long, groupName: String) {
-        currentChatType = "GROUP"
-        currentGroupId = groupId
-        receiverName = groupName
-        println("🔄 Setting up group chat - GroupID: $groupId, Name: $groupName, title: $receiverName")
+    private fun setupChat() {
+        // 从Intent中获取聊天参数，不要覆盖之前设置的值
+        println("📝 setupChat() - Current values:")
+        println("   chatType: $chatType")
+        println("   receiverId: $receiverId") 
+        println("   receiverName: $receiverName")
         
-        // 设置标题
-        supportActionBar?.title = "$groupName (群聊)"
-        
-        // 加载群聊消息
-        loadMessages(groupId, "GROUP")
-        
-        // 标记消息为已读
-        markMessagesAsRead(groupId, "GROUP")
-    }
-
-    private fun setupPrivateChat(receiverId: Long, receiverName: String) {
-        currentChatType = "PRIVATE"
+        // 确保聊天类型和接收者ID正确设置
+        currentChatType = chatType
         currentReceiverId = receiverId
-        this.receiverName = receiverName
+        partnerId = receiverId
         
-        // 更新适配器
+        // 如果是群聊，设置群ID
+        if (chatType == "GROUP") {
+            currentGroupId = receiverId  // 对于群聊，receiverId 就是群ID
+        }
+        
+        println("📝 Setup completed - Updated values:")
+        println("   currentChatType: $currentChatType")
+        println("   currentReceiverId: $currentReceiverId")
+        println("   currentGroupId: $currentGroupId")
+        
+        // 创建新的适配器实例
         adapter = MessageAdapter(
             context = this,
             currentUserId = UserPreferences.getUserId(this),
-            currentChatType = currentChatType,
+            currentChatType = chatType,
             chatPartnerId = receiverId,
             onMessageLongClick = { position ->
                 if (!isMultiSelectMode) {
@@ -628,27 +712,66 @@ class ChatActivity : AppCompatActivity() {
         
         messagesList.adapter = adapter
         
-        // 加载消息历史
-        loadMessages(receiverId, currentChatType)
+        // 设置工具栏标题
+        title = when (chatType) {
+            "GROUP" -> "$receiverName (群聊)"
+            else -> receiverName
+        }
         
-        // 标记消息为已读
-        markMessagesAsRead(receiverId, currentChatType)
+        // 设置工具栏
+        setupToolbar()
         
-        // 更新工具栏标题
-        supportActionBar?.title = receiverName
-        
-        // 确保 WebSocket 已连接
-        if (!WebSocketManager.isConnected()) {
-            val serverUrl = "http://192.168.31.194:8080/ws"
-            WebSocketManager.init(
-                serverUrl = serverUrl,
-                userId = UserPreferences.getUserId(this)
-            )
+        // 标记会话为已读
+        if (currentReceiverId > 0) {
+            markSessionAsRead()
+        } else {
+            println("⚠️ Cannot mark session as read - invalid receiverId: $currentReceiverId")
         }
     }
 
-    private fun updateToolbarTitle(newTitle: String) {
-        supportActionBar?.title = newTitle
+    private fun setupToolbar() {
+        setSupportActionBar(binding.toolbar)
+        supportActionBar?.apply {
+            setDisplayHomeAsUpEnabled(true)
+            setDisplayShowHomeEnabled(true)
+            setDisplayShowTitleEnabled(false)  // 不显示默认标题
+        }
+
+        // 设置自定义标题
+        binding.toolbarTitle.text = when (chatType) {
+            "GROUP" -> "$receiverName (群聊)"
+            else -> receiverName
+        }
+
+        // 加载头像
+        val avatarUrl = when (chatType) {
+            "GROUP" -> "$baseUrl/api/groups/$receiverId/avatar"
+            else -> "$baseUrl/api/users/$receiverId/avatar"
+        }
+
+        Glide.with(this)
+            .load(avatarUrl)
+            .skipMemoryCache(true)
+            .diskCacheStrategy(DiskCacheStrategy.NONE)
+            .circleCrop()
+            .placeholder(
+                if (chatType == "GROUP")
+                    R.drawable.default_group_avatar
+                else
+                    R.drawable.default_avatar
+            )
+            .error(
+                if (chatType == "GROUP")
+                    R.drawable.default_group_avatar
+                else
+                    R.drawable.default_avatar
+            )
+            .into(binding.partnerAvatar)
+    }
+
+    private fun updateTitle(newTitle: String) {
+        title = newTitle
+        setupToolbar()
     }
 
     private fun loadMessages(partnerId: Long, type: String) {
@@ -728,52 +851,6 @@ class ChatActivity : AppCompatActivity() {
                     }
                 }
             )
-        }
-    }
-
-    private fun setupToolbar() {
-        val toolbar = findViewById<Toolbar>(R.id.toolbar)
-        setSupportActionBar(toolbar)
-        supportActionBar?.apply {
-            setDisplayHomeAsUpEnabled(true)
-            setDisplayShowHomeEnabled(true)
-            // 设置初始标题
-            title = when (currentChatType) {
-                "PRIVATE" -> receiverName
-                "GROUP" -> "$receiverName (群聊)"
-                else -> receiverName
-            }
-        }
-    }
-
-    private fun setupChat() {
-        currentChatType = intent.getStringExtra("chat_type") ?: "PRIVATE"
-        
-        when (currentChatType) {
-            "GROUP" -> {
-                val groupId = intent.getLongExtra("group_id", -1)
-                val groupName = intent.getStringExtra("group_name") ?: ""
-                if (groupId != -1L) {
-                    currentGroupId = groupId
-                    receiverName = groupName
-                    supportActionBar?.title = "$groupName (群聊)"  // 使用 supportActionBar 设置标题
-                    setupGroupChat(groupId, groupName)
-                } else {
-                    handleInvalidChat()
-                }
-            }
-            "PRIVATE" -> {
-                val receiverId = intent.getLongExtra("receiver_id", -1)
-                val receiverName = intent.getStringExtra("receiver_name") ?: ""  // 这应该已经是 nickname
-                if (receiverId != -1L) {
-                    currentReceiverId = receiverId
-                    this.receiverName = receiverName
-                    supportActionBar?.title = receiverName  // 使用 nickname 作为标题
-                    setupPrivateChat(receiverId, receiverName)
-                } else {
-                    handleInvalidChat()
-                }
-            }
         }
     }
 
@@ -877,7 +954,7 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun setupDeleteButton() {
-        deleteButton = findViewById(R.id.deleteButton)
+        deleteButton = binding.deleteButton
         deleteButton.visibility = View.GONE
         deleteButton.setOnClickListener {
             val selectedMessages = adapter.getSelectedMessages()
@@ -908,5 +985,70 @@ class ChatActivity : AppCompatActivity() {
         super.onResume()
         // 其他代码...
         markMessagesAsRead()
+    }
+
+    private fun openGroupSettings() {
+        val groupId = intent.getLongExtra("receiver_id", -1)
+        if (groupId == -1L) {
+            Toast.makeText(this, "群组ID无效", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val groupName = intent.getStringExtra("chatName") ?: ""
+        
+        // 将获取管理员状态的逻辑移到 GroupSettingsActivity
+        val intent = Intent(this, GroupSettingsActivity::class.java).apply {
+            putExtra("group_id", groupId)
+            putExtra("group_name", groupName)
+        }
+        startActivity(intent)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        when (requestCode) {
+            FileUtil.STORAGE_PERMISSION_CODE -> {
+                if (grantResults.isNotEmpty() && 
+                    grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+                    // 权限已获取，继续之前的操作
+                    // ...
+                } else {
+                    Toast.makeText(this, "需要存储权限才能上传文件", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun loadPartnerAvatar() {
+        val avatarUrl = when (chatType) {
+            "GROUP" -> "$baseUrl/api/groups/$receiverId/avatar"
+            else -> "$baseUrl/api/users/$receiverId/avatar"
+        }
+        
+        // 确保头像 ImageView 存在于布局中
+        binding.toolbar.findViewById<ImageView>(R.id.partnerAvatar)?.let { avatarView ->
+            Glide.with(this)
+                .load(avatarUrl)
+                .skipMemoryCache(true)
+                .diskCacheStrategy(DiskCacheStrategy.NONE)
+                .circleCrop()
+                .placeholder(
+                    if (chatType == "GROUP")
+                        R.drawable.default_group_avatar
+                    else
+                        R.drawable.default_avatar
+                )
+                .error(
+                    if (chatType == "GROUP")
+                        R.drawable.default_group_avatar
+                    else
+                        R.drawable.default_avatar
+                )
+                .into(avatarView)
+        }
     }
 }

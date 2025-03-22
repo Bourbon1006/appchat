@@ -16,6 +16,7 @@ import java.io.IOException
 import org.springframework.beans.factory.annotation.Value
 import java.io.FileNotFoundException
 import java.lang.RuntimeException
+import org.example.appchathandler.dto.FileUploadResponse
 
 @Service
 class FileService(
@@ -65,7 +66,7 @@ class FileService(
         }
     }
 
-    fun saveFile(file: MultipartFile): FileDTO {
+    fun saveFile(file: MultipartFile): FileUploadResponse {
         try {
             // 确保上传目录存在
             if (!uploadDirectory.exists()) {
@@ -89,12 +90,9 @@ class FileService(
             val fileUrl = "/api/files/$uniqueFilename"
             println("✅ File URL: $fileUrl")
 
-            return FileDTO(
-                id = 0L,
-                filename = originalFilename,
-                url = fileUrl,
-                size = file.size,
-                contentType = file.contentType ?: "application/octet-stream"
+            return FileUploadResponse(
+                fileName = uniqueFilename,
+                url = fileUrl
             )
         } catch (e: Exception) {
             e.printStackTrace()

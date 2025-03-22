@@ -2,7 +2,10 @@ package com.example.appchat.fragment
 
 import android.app.Activity
 import android.app.ProgressDialog
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
@@ -15,6 +18,8 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
+import com.bumptech.glide.Glide
+import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.example.appchat.R
 import com.example.appchat.api.ApiClient
 import com.example.appchat.api.UpdateNicknameRequest
@@ -22,17 +27,27 @@ import com.example.appchat.api.UpdatePasswordRequest
 import com.example.appchat.databinding.FragmentMeBinding
 import com.example.appchat.model.UserDTO
 import com.example.appchat.util.UserPreferences
+import com.example.appchat.util.FileUtil
 import com.example.appchat.util.loadAvatar
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
-import java.io.File
+import retrofit2.Response
+import okhttp3.ResponseBody
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 
 class MeFragment : Fragment() {
     private var _binding: FragmentMeBinding? = null
     private val binding get() = _binding!!
     private val userId: Long by lazy { UserPreferences.getUserId(requireContext()) }
+    private val avatarUpdateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == "com.example.appchat.REFRESH_AVATAR") {
+                loadAvatar()
+            }
+        }
+    }
     
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -46,6 +61,14 @@ class MeFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         
+        // 使用 LocalBroadcastManager 注册广播接收器
+        LocalBroadcastManager.getInstance(requireContext())
+            .registerReceiver(
+                avatarUpdateReceiver,
+                IntentFilter("com.example.appchat.REFRESH_AVATAR")
+            )
+        
+        loadAvatar()
         setupViews()
         loadUserInfo()
     }
@@ -107,9 +130,9 @@ class MeFragment : Fragment() {
                         // 添加更多日志
                         Log.d("MeFragment", "最终使用的 URL: $fullAvatarUrl")
                         
-                        binding.avatarImage.loadAvatar(fullAvatarUrl)
+                        binding.userAvatar.loadAvatar(fullAvatarUrl)
                         updateUI(user)
-                        binding.statusSpinner.setSelection(user.onlineStatus)
+                        binding.statusSpinner.setSelection(user.onlineStatus ?: 0)
                     }
                 } else {
                     // 添加错误日志
@@ -299,12 +322,65 @@ class MeFragment : Fragment() {
         }
     }
 
+    private fun loadAvatar() {
+        val userId = UserPreferences.getUserId(requireContext())
+        val baseUrl = getString(
+            R.string.server_url_format,
+            getString(R.string.server_ip),
+            getString(R.string.server_port)
+        )
+        val avatarUrl = "$baseUrl/api/users/$userId/avatar"
+        
+        // 使用扩展函数加载头像，与 loadUserInfo() 中保持一致
+        binding.userAvatar.loadAvatar(avatarUrl)
+    }
+
     private fun uploadAvatar(uri: Uri) {
-        // 实现头像上传逻辑
+        val file = FileUtil.getFileFromUri(requireContext(), uri) ?: run {
+            Toast.makeText(context, "无法读取文件", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val progressDialog = ProgressDialog(context).apply {
+            setMessage("正在上传头像...")
+            setCancelable(false)
+            show()
+        }
+
+        val requestFile = file.asRequestBody("image/*".toMediaTypeOrNull())
+        val body = MultipartBody.Part.createFormData("avatar", file.name, requestFile)
+        val userId = UserPreferences.getUserId(requireContext())
+
+        lifecycleScope.launch {
+            try {
+                val response: Response<ResponseBody> = ApiClient.apiService.uploadAvatar(userId, body)
+                if (response.isSuccessful) {
+                    loadAvatar()
+                    // 使用 LocalBroadcastManager 发送广播
+                    LocalBroadcastManager.getInstance(requireContext())
+                        .sendBroadcast(Intent("com.example.appchat.REFRESH_AVATAR"))
+                    Toast.makeText(context, "头像上传成功", Toast.LENGTH_SHORT).show()
+                } else {
+                    val errorMessage = response.errorBody()?.string() ?: "未知错误"
+                    Toast.makeText(context, "上传失败: $errorMessage", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "上传失败: ${e.message}", Toast.LENGTH_SHORT).show()
+            } finally {
+                progressDialog.dismiss()
+            }
+        }
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
+        // 使用 LocalBroadcastManager 注销广播接收器
+        try {
+            LocalBroadcastManager.getInstance(requireContext())
+                .unregisterReceiver(avatarUpdateReceiver)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
         _binding = null
     }
 

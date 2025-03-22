@@ -1,4 +1,4 @@
-package com.example.appchat
+package com.example.appchat.activity
 
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
@@ -6,6 +6,7 @@ import android.widget.Button
 import android.widget.TextView
 import android.widget.ImageView
 import com.bumptech.glide.Glide
+import com.example.appchat.R
 
 class FriendProfileActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

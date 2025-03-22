@@ -13,6 +13,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.Target
+import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.example.appchat.R
 import com.example.appchat.databinding.ItemMomentBinding
 import com.example.appchat.model.Moment
@@ -64,6 +65,9 @@ class MomentsAdapter(
         // 加载用户头像
         Glide.with(holder.itemView.context)
             .load(baseUrl + moment.userAvatar)
+            .skipMemoryCache(true)
+            .diskCacheStrategy(DiskCacheStrategy.NONE)
+            .circleCrop()
             .placeholder(R.drawable.default_avatar)
             .error(R.drawable.default_avatar)
             .into(holder.ivAvatar)

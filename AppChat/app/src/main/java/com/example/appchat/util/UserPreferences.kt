@@ -21,9 +21,19 @@ object UserPreferences {
         }
     }
 
+    fun saveUserId(context: Context, userId: Long) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(KEY_USER_ID, userId)
+            .apply()
+        println("✅ Saved userId: $userId")
+    }
+
     fun getUserId(context: Context): Long {
-        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        return prefs.getLong(KEY_USER_ID, -1)
+        val userId = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .getLong(KEY_USER_ID, -1)
+        println("📱 Retrieved userId: $userId")
+        return userId
     }
 
     fun getToken(context: Context): String? {
@@ -49,8 +59,11 @@ object UserPreferences {
     }
 
     fun clearUserData(context: Context) {
-        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().apply()
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .apply()
+        println("🗑️ Cleared user data")
     }
 
     fun saveUserNickname(context: Context, nickname: String?) {
@@ -61,5 +74,21 @@ object UserPreferences {
     fun getUserNickname(context: Context): String? {
         val sharedPreferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         return sharedPreferences.getString(KEY_USER_NICKNAME, null)
+    }
+
+    fun saveUsername(context: Context, username: String) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_USERNAME, username)
+            .apply()
+        println("✅ Saved username: $username")
+    }
+
+    fun saveToken(context: Context, token: String) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_TOKEN, token)
+            .apply()
+        println("✅ Saved token")
     }
 } 

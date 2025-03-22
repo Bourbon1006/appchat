@@ -6,44 +6,34 @@
     android:padding="8dp">
 
     <ImageView
-        android:id="@+id/avatarImage"
-        android:layout_width="50dp"
-        android:layout_height="50dp"
+        android:id="@+id/contactAvatar"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
         android:src="@drawable/default_avatar"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent" />
-
-    <TextView
-        android:id="@+id/nameText"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        app:layout_constraintStart_toEndOf="@id/avatarImage"
-        app:layout_constraintTop_toTopOf="@id/avatarImage"
-        app:layout_constraintEnd_toStartOf="@id/statusIndicator" />
+        app:layout_constraintBottom_toBottomOf="parent"/>
 
     <View
         android:id="@+id/statusIndicator"
         android:layout_width="12dp"
         android:layout_height="12dp"
-        android:layout_marginEnd="8dp"
-        android:background="@drawable/status_indicator_offline"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="@id/nameText"
-        app:layout_constraintBottom_toBottomOf="@id/nameText" />
+        android:background="@color/offline"
+        app:layout_constraintEnd_toEndOf="@+id/contactAvatar"
+        app:layout_constraintBottom_toBottomOf="@+id/contactAvatar"
+        android:layout_marginEnd="-2dp"
+        android:layout_marginBottom="-2dp"/>
 
     <TextView
-        android:id="@+id/statusText"
-        android:layout_width="wrap_content"
+        android:id="@+id/contactName"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:text="离线"
-        android:textSize="12sp"
-        android:textColor="#757575"
-        app:layout_constraintStart_toStartOf="@id/nameText"
-        app:layout_constraintTop_toBottomOf="@id/nameText" />
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:layout_marginStart="16dp"
+        app:layout_constraintStart_toEndOf="@+id/contactAvatar"
+        app:layout_constraintTop_toTopOf="@+id/contactAvatar"
+        app:layout_constraintBottom_toBottomOf="@+id/contactAvatar"
+        app:layout_constraintEnd_toEndOf="parent"/>
 
 </androidx.constraintlayout.widget.ConstraintLayout> 

@@ -5,10 +5,11 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="29" />
-    <!-- 对于 Android 13 及以上版本 -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" 
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" 
+        android:maxSdkVersion="32" />
+    <!-- Android 13+ -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
@@ -42,7 +43,7 @@
             android:requestLegacyExternalStorage="true"
             tools:targetApi="31">
         <activity
-                android:name=".LoginActivity"
+                android:name=".activity.LoginActivity"
                 android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -52,39 +53,50 @@
         </activity>
 
         <activity
-            android:name=".ChatActivity"
+            android:name=".activity.ChatActivity"
             android:windowSoftInputMode="adjustResize" />
 
         
         <activity
-            android:name=".RegisterActivity"
+            android:name=".activity.RegisterActivity"
             android:exported="false" />
 
         <activity
-            android:name=".MainActivity"
+            android:name=".activity.MainActivity"
+            android:theme="@style/SplashTheme"
             android:exported="false" />
 
         <activity
-            android:name=".ImagePreviewActivity"
+            android:name=".activity.ImagePreviewActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"/>
 
         <activity
-            android:name=".VideoPreviewActivity"
+            android:name=".activity.VideoPreviewActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:configChanges="orientation|screenSize"/>
 
         <activity
-            android:name=".ProfileActivity"
+            android:name=".activity.ProfileActivity"
             android:label="个人资料" />
 
         <activity
-            android:name=".NearbyTransferActivity"
+            android:name=".activity.NearbyTransferActivity"
             android:label="面对面快传"
             android:exported="false" />
 
         <activity
             android:name=".activity.CreateMomentActivity"
             android:label="发布动态" />
+
+        <activity
+            android:name=".activity.GroupSettingsActivity"
+            android:exported="false"
+            android:label="群聊设置" />
+
+        <activity
+            android:name=".activity.SelectContactsActivity"
+            android:label="选择联系人"
+            android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -11,14 +11,10 @@
         <menu>
             <item
                 android:id="@+id/action_search_messages"
-                android:icon="@drawable/ic_search"
-                android:title="搜索消息"
-                app:showAsAction="never" />
+                android:title="搜索消息" />
             <item
                 android:id="@+id/action_search_users"
-                android:icon="@drawable/ic_search_user"
-                android:title="搜索用户"
-                app:showAsAction="never" />
+                android:title="搜索用户" />
         </menu>
     </item>
 
@@ -26,40 +22,29 @@
     <item
         android:id="@+id/action_clear_chat"
         android:icon="@drawable/ic_delete"
-        android:title="删除"
+        android:title="清空聊天"
         android:visible="false"
-        app:showAsAction="always" />
+        app:showAsAction="never" />
 
     <!-- 更多按钮 -->
     <item
         android:id="@+id/action_more"
-        android:icon="@drawable/ic_more"
+        android:icon="@drawable/ic_more_vert"
         android:title="更多"
         app:showAsAction="always">
         <menu>
             <item
                 android:id="@+id/menu_profile"
-                android:icon="@drawable/ic_profile"
-                android:title="个人资料"
-                app:showAsAction="never" />
-
+                android:title="个人资料" />
             <item
                 android:id="@+id/menu_group_chat"
-                android:icon="@drawable/ic_group_chat"
-                android:title="创建群聊"
-                app:showAsAction="never" />
-
+                android:title="创建群聊" />
             <item
                 android:id="@+id/action_nearby_transfer"
-                android:icon="@drawable/ic_nearby_transfer"
-                android:title="面对面快传"
-                app:showAsAction="never" />
-
+                android:title="面对面快传" />
             <item
                 android:id="@+id/action_logout"
-                android:icon="@drawable/ic_logout"
-                android:title="退出登录"
-                app:showAsAction="never" />
+                android:title="退出登录" />
         </menu>
     </item>
 </menu> 

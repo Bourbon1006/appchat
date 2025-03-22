@@ -17,7 +17,8 @@ import org.example.appchathandler.event.FriendRequestNotificationEvent
 class FriendRequestService(
     private val friendRequestRepository: FriendRequestRepository,
     private val friendService: FriendService,
-    private val userService: UserService
+    private val userService: UserService,
+    private val applicationEventPublisher: ApplicationEventPublisher
 ) {
     @Autowired
     private lateinit var eventPublisher: ApplicationEventPublisher
@@ -44,15 +45,15 @@ class FriendRequestService(
         
         val request = FriendRequest(
             sender = sender,
-            receiver = receiver
+            receiver = receiver,
+            status = RequestStatus.PENDING,
+            timestamp = LocalDateTime.now()
         )
         val savedRequest = friendRequestRepository.save(request)
         
-        // 添加日志
-        println("🔔 Publishing FriendRequestEvent for request ${savedRequest.id} from ${savedRequest.sender.username} to ${savedRequest.receiver.username}")
-        
-        // 发布好友请求事件
-        eventPublisher.publishEvent(FriendRequestEvent(this, savedRequest))
+        // 只通过事件发送通知，不直接调用 WebSocket
+        println("🔔 Publishing FriendRequestEvent for request ${savedRequest.id}")
+        applicationEventPublisher.publishEvent(FriendRequestEvent(this, savedRequest))
         
         return savedRequest
     }
@@ -143,7 +144,7 @@ class FriendRequestService(
         val savedRequest = friendRequestRepository.save(request)
         
         // 发布通知事件
-        eventPublisher.publishEvent(FriendRequestNotificationEvent(this, savedRequest))
+        applicationEventPublisher.publishEvent(FriendRequestNotificationEvent(this, savedRequest))
         
         return savedRequest
     }

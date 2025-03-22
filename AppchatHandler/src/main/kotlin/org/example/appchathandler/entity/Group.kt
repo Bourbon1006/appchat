@@ -1,30 +1,38 @@
 package org.example.appchathandler.entity
 
+import java.time.LocalDateTime
 import jakarta.persistence.*
 
 @Entity
 @Table(name = "`groups`")
-class Group(
+data class Group(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    var id: Long = 0,
-
+    val id: Long = 0,
+    
     var name: String,
-
+    
+    var description: String? = null,
+    
     @Column(name = "avatar_url")
     var avatarUrl: String? = null,
-
-    @ManyToOne(fetch = FetchType.EAGER)
+    
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "creator_id")
-    var creator: User,
-
-    @ManyToMany(fetch = FetchType.EAGER, cascade = [CascadeType.PERSIST, CascadeType.MERGE])
+    val creator: User,
+    
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "owner_id")
+    var owner: User,
+    
+    @Column(name = "created_at")
+    val createdAt: LocalDateTime = LocalDateTime.now(),
+    
+    @ManyToMany
     @JoinTable(
         name = "group_members",
         joinColumns = [JoinColumn(name = "group_id")],
         inverseJoinColumns = [JoinColumn(name = "user_id")]
     )
-    var members: MutableSet<User> = mutableSetOf()
-) {
-    constructor() : this(name = "", creator = User())
-} 
+    val members: MutableSet<User> = mutableSetOf()
+) 

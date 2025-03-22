@@ -1,4 +1,4 @@
-package com.example.appchat
+package com.example.appchat.activity
 
 import android.content.Intent
 import android.os.Bundle
@@ -13,10 +13,9 @@ import com.example.appchat.util.UserPreferences
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
-import com.google.gson.Gson
-import android.widget.TextView
 import android.view.View
 import android.widget.ProgressBar
+import com.example.appchat.R
 
 class LoginActivity : AppCompatActivity() {
     private lateinit var usernameInput: EditText
@@ -65,17 +64,7 @@ class LoginActivity : AppCompatActivity() {
 
                 if (response.isSuccessful) {
                     response.body()?.let { authResponse ->
-                        // 保存用户信息
-                        UserPreferences.saveUserData(
-                            this@LoginActivity,
-                            authResponse.userId,
-                            authResponse.token,
-                            authResponse.username
-                        )
-
-                        // 跳转到主界面
-                        startActivity(Intent(this@LoginActivity, MainActivity::class.java))
-                        finish()
+                        handleLoginSuccess(authResponse)
                     }
                 } else {
                     Toast.makeText(this@LoginActivity, "登录失败", Toast.LENGTH_SHORT).show()
@@ -88,5 +77,29 @@ class LoginActivity : AppCompatActivity() {
                 Toast.makeText(this@LoginActivity, "网络错误", Toast.LENGTH_SHORT).show()
             }
         })
+    }
+
+    private fun handleLoginSuccess(response: AuthResponse) {
+        // 使用现有的 saveUserData 方法保存所有用户信息
+        UserPreferences.saveUserData(
+            context = this,
+            userId = response.userId,
+            token = response.token,
+            username = response.username
+        )
+        
+        // 打印日志确认
+        println("✅ Login success - userId: ${response.userId}")
+        
+        // 启动主页面
+        navigateToMain()
+    }
+
+    private fun navigateToMain() {
+        val intent = Intent(this, MainActivity::class.java)
+        startActivity(intent)
+        // 添加过渡动画
+        overridePendingTransition(R.anim.fade_in, R.anim.fade_out)
+        finish()
     }
 } 
