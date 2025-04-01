@@ -28,9 +28,11 @@ import com.example.appchat.dialog.FriendRequestsDialog
 import kotlinx.coroutines.launch
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.viewModels
-import com.example.appchat.viewmodel.ContactsViewModel
 import android.util.Log
 import com.example.appchat.adapter.FriendRequestAdapter
+import android.app.AlertDialog
+import android.widget.TextView
+import com.google.android.material.bottomsheet.BottomSheetDialog
 
 class ContactsFragment : Fragment() {
     private lateinit var viewPager: ViewPager2
@@ -58,7 +60,6 @@ class ContactsFragment : Fragment() {
     private var lastContactsLoadTime = 0L
     private val THROTTLE_DELAY = 500L  // 500毫秒内不重复加载
 
-    private val viewModel by viewModels<ContactsViewModel>()
 
     private var friendRequestsDialog: FriendRequestsDialog? = null
 
@@ -99,15 +100,21 @@ class ContactsFragment : Fragment() {
     
     private fun setupRecyclerViews() {
         contactsRecyclerView = binding.contactsRecyclerView ?: return
-        contactAdapter = ContactAdapter(contacts) { contact ->
-            // 处理联系人点击事件
-            val intent = Intent(requireContext(), ChatActivity::class.java).apply {
-                putExtra("chat_type", "PRIVATE")
-                putExtra("receiver_id", contact.id)
-                putExtra("receiver_name", contact.nickname ?: contact.username)
+        
+        contactAdapter = ContactAdapter(
+            onContactClick = { contact ->
+                // 处理联系人点击事件
+                val intent = Intent(requireContext(), ChatActivity::class.java).apply {
+                    putExtra("contactId", contact.id)
+                    putExtra("contactName", contact.nickname ?: contact.username)
+                }
+                startActivity(intent)
+            },
+            onContactLongClick = { contact ->
+                // 处理长按事件
+                showContactActions(contact)
             }
-            startActivity(intent)
-        }
+        )
         
         contactsRecyclerView.apply {
             layoutManager = LinearLayoutManager(requireContext())
@@ -516,6 +523,75 @@ class ContactsFragment : Fragment() {
             }
             binding.friendRequestsLayout.visibility = 
                 if (count > 0) View.VISIBLE else View.GONE
+        }
+    }
+
+    // 更新联系人列表的方法
+    fun updateContacts(newContacts: List<Contact>) {
+        contacts.clear()
+        contacts.addAll(newContacts)
+        contactAdapter.submitList(newContacts)
+    }
+
+    private fun showContactActions(contact: Contact) {
+        val dialog = BottomSheetDialog(requireContext())
+        val view = layoutInflater.inflate(R.layout.dialog_contact_actions, null)
+        
+        // 设置联系人名称
+        view.findViewById<TextView>(R.id.contactNameTitle).text = contact.nickname ?: contact.username
+        
+        // 发送消息
+        view.findViewById<View>(R.id.chatAction).setOnClickListener {
+            dialog.dismiss()
+            val intent = Intent(requireContext(), ChatActivity::class.java).apply {
+                putExtra("contactId", contact.id)
+                putExtra("contactName", contact.nickname ?: contact.username)
+            }
+            startActivity(intent)
+        }
+        
+        // 查看资料
+        view.findViewById<View>(R.id.viewProfileAction).setOnClickListener {
+            dialog.dismiss()
+            // TODO: 实现查看资料功能
+        }
+        
+        // 删除好友
+        view.findViewById<View>(R.id.deleteAction).setOnClickListener {
+            dialog.dismiss()
+            showDeleteConfirmDialog(contact)
+        }
+        
+        dialog.setContentView(view)
+        dialog.show()
+    }
+
+    private fun showDeleteConfirmDialog(contact: Contact) {
+        AlertDialog.Builder(requireContext())
+            .setTitle("删除好友")
+            .setMessage("确定要删除好友\"${contact.nickname ?: contact.username}\"吗？")
+            .setPositiveButton("确定") { dialog, _ ->
+                dialog.dismiss()
+                deleteContact(contact)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun deleteContact(contact: Contact) {
+        val userId = UserPreferences.getUserId(requireContext())
+        lifecycleScope.launch {
+            try {
+                val response = ApiClient.apiService.deleteFriend(userId = userId, friendId = contact.id)
+                if (response.isSuccessful) {
+                    Toast.makeText(context, "已删除好友", Toast.LENGTH_SHORT).show()
+                    loadContacts()
+                } else {
+                    Toast.makeText(context, "删除失败", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "网络错误", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 }

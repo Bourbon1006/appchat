@@ -49,4 +49,6 @@
     <color name="online">#4CAF50</color>
     <color name="offline">#9E9E9E</color>
     <color name="busy_red">#E53935</color>
+
+    <color name="group_header_background">#F5F5F5</color>
 </resources>

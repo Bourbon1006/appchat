@@ -3,3 +3,11 @@ plugins {
     id("com.android.application") version "8.2.0" apply false
     id("org.jetbrains.kotlin.android") version "1.9.23" apply false
 }
+
+buildscript {
+    val kotlinVersion by extra("1.9.23") // 使用您项目中的实际版本
+    
+    dependencies {
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
+    }
+}
