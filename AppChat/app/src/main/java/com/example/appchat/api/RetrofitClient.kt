@@ -1,3 +1,4 @@
+/*
 package com.example.appchat.api
 
 import retrofit2.Retrofit
@@ -21,4 +22,4 @@ object RetrofitClient {
 interface MessageService {
     @GET("api/messages/sessions")
     suspend fun getMessageSessions(@Query("userId") userId: Long): Response<List<MessageSessionDTO>>
-} 
+} */

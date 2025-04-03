@@ -13,7 +13,7 @@ import com.example.appchat.R
 class ContactGroupAdapter(
     private val groups: List<ContactGroup>,
     private val onContactClick: (Contact) -> Unit,
-    private val onContactLongClick: (Contact) -> Unit,
+    private val onContactLongClick: (Contact, Long) -> Unit,
     private val onGroupLongClick: (ContactGroup) -> Unit
 ) : RecyclerView.Adapter<ContactGroupAdapter.GroupViewHolder>() {
 
@@ -23,8 +23,13 @@ class ContactGroupAdapter(
         RecyclerView.ViewHolder(binding.root) {
         
         private val contactsAdapter = ContactAdapter(
-            onContactClick = onContactClick,
-            onContactLongClick = onContactLongClick
+            onContactClick = { contact -> 
+                // 直接调用外部传入的点击处理函数
+                onContactClick(contact)
+            },
+            onContactLongClick = { contact -> 
+                onContactLongClick(contact, groups[adapterPosition].id)
+            }
         )
 
         init {
@@ -38,7 +43,7 @@ class ContactGroupAdapter(
             binding.apply {
                 // 设置组名和联系人数量
                 groupName.text = group.name
-                contactCount.text = "(${group.contacts.size})"
+                contactCount.text = "(${group.contacts?.size ?: 0})"
 
                 // 设置展开状态
                 val isExpanded = expandedGroups.contains(group.id)
@@ -49,22 +54,30 @@ class ContactGroupAdapter(
                 )
 
                 // 设置联系人列表
-                contactsAdapter.submitList(group.contacts)
+                contactsAdapter.submitList(group.contacts ?: emptyList())
 
-                // 设置点击事件
-                groupHeader.setOnClickListener {
+                // 设置分组长按事件
+                groupHeader.setOnLongClickListener { view ->
+                    println("�� Group long clicked: ${group.name}, type: ${group.groupType}")
+                    if (group.groupType != ContactGroup.TYPE_DEFAULT) {
+                        view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)  // 添加触感反馈
+                        onGroupLongClick(group)
+                        true
+                    } else {
+                        false
+                    }
+                }
+
+                // 设置分组点击事件
+                groupHeader.setOnClickListener { view ->
+                    println("📝 Group clicked: ${group.name}")
+                    val isExpanded = expandedGroups.contains(group.id)
                     if (isExpanded) {
                         expandedGroups.remove(group.id)
                     } else {
                         expandedGroups.add(group.id)
                     }
                     notifyItemChanged(adapterPosition)
-                }
-
-                // 设置长按事件
-                groupHeader.setOnLongClickListener {
-                    onGroupLongClick(group)
-                    true
                 }
             }
         }

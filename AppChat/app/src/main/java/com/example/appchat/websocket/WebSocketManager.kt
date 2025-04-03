@@ -27,7 +27,7 @@ object WebSocketManager {
     private val userStatusListeners = CopyOnWriteArrayList<(List<UserDTO>) -> Unit>()
     private val errorListeners = mutableListOf<(String) -> Unit>()
     private val friendRequestListeners = mutableListOf<(FriendRequest) -> Unit>()
-    private val friendRequestSentListeners = CopyOnWriteArrayList<() -> Unit>()
+    val friendRequestSentListeners = CopyOnWriteArrayList<() -> Unit>()
     private val friendRequestResultListeners = CopyOnWriteArrayList<(Long, Boolean) -> Unit>()
     private val groupCreatedListeners = CopyOnWriteArrayList<(Group) -> Unit>()
     private val sessionUpdateListeners = CopyOnWriteArrayList<(ChatMessage) -> Unit>()

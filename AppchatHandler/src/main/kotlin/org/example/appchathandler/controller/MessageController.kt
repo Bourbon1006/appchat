@@ -70,13 +70,8 @@ class MessageController(
     fun searchMessages(
         @RequestParam userId: Long,
         @RequestParam keyword: String
-    ): ResponseEntity<List<MessageDTO>> {
-        return try {
-            val messages = messageService.searchMessages(userId, keyword)
-            ResponseEntity.ok(messages.map { it.toDTO() })
-        } catch (e: Exception) {
-            ResponseEntity.badRequest().build()
-        }
+    ): List<MessageDTO> {
+        return messageService.searchMessages(userId, keyword)
     }
 
     @DeleteMapping("/{messageId}")

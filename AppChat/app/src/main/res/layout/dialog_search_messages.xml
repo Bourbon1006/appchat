@@ -9,15 +9,28 @@
         android:id="@+id/searchInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="输入搜索内容"
+        android:hint="搜索消息"
         android:imeOptions="actionSearch"
         android:inputType="text"
         android:maxLines="1" />
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/searchResults"
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:maxHeight="300dp" />
+        android:layout_height="wrap_content">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/searchResults"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxHeight="400dp" />
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:visibility="gone" />
+
+    </FrameLayout>
+
 </LinearLayout> 

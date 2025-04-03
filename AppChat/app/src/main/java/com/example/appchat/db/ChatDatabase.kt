@@ -3,97 +3,33 @@ package com.example.appchat.db
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
-import android.database.sqlite.SQLiteOpenHelper
 import com.example.appchat.model.ChatMessage
 import com.example.appchat.model.MessageType
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
-class ChatDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
-
-    companion object {
-        private const val DATABASE_NAME = "chat.db"
-        private const val DATABASE_VERSION = 3
-        private const val TABLE_MESSAGES = "messages"
-        private const val TABLE_USERS = "users"
-        
-        private const val COLUMN_ID = "id"
-        private const val COLUMN_SENDER_ID = "sender_id"
-        private const val COLUMN_SENDER_NAME = "sender_name"
-        private const val COLUMN_CONTENT = "content"
-        private const val COLUMN_TYPE = "type"
-        private const val COLUMN_FILE_URL = "file_url"
-        private const val COLUMN_TIMESTAMP = "timestamp"
-        private const val COLUMN_CHAT_TYPE = "chat_type"
-        private const val COLUMN_RECEIVER_ID = "receiver_id"
-        private const val COLUMN_GROUP_ID = "group_id"
-        private const val COLUMN_MESSAGE_ID = "id"
-        private const val COLUMN_DELETED_BY = "deleted_by"
-
-        // 创建消息表的 SQL
-        private const val CREATE_MESSAGES_TABLE = """
-            CREATE TABLE IF NOT EXISTS $TABLE_MESSAGES (
-                id INTEGER PRIMARY KEY,
-                sender_id INTEGER,
-                sender_name TEXT,
-                content TEXT,
-                type TEXT,
-                file_url TEXT,
-                timestamp TEXT,
-                chat_type TEXT,
-                receiver_id INTEGER,
-                group_id INTEGER,
-                deleted_by TEXT DEFAULT ''
-            )
-        """
-
-        // 创建用户表的 SQL
-        private const val CREATE_USERS_TABLE = """
-            CREATE TABLE IF NOT EXISTS $TABLE_USERS (
-                id INTEGER PRIMARY KEY,
-                username TEXT NOT NULL,
-                avatar_url TEXT,
-                is_online INTEGER DEFAULT 0
-            )
-        """
-    }
-
-    override fun onCreate(db: SQLiteDatabase) {
-        // 创建所有表
-        db.execSQL(CREATE_MESSAGES_TABLE)
-        db.execSQL(CREATE_USERS_TABLE)
-    }
-
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion < 3) {
-            // 添加 deleted_by 列
-            try {
-                db.execSQL("ALTER TABLE $TABLE_MESSAGES ADD COLUMN deleted_by TEXT DEFAULT ''")
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-    }
+class ChatDatabase(private val context: Context) {
+    private val dbHelper = ChatDatabaseHelper(context)
 
     fun saveMessage(message: ChatMessage, chatType: String, receiverId: Long? = null, groupId: Long? = null) {
-        val db = this.writableDatabase
+        val db = dbHelper.writableDatabase
         try {
             db.beginTransaction()
             
             val values = ContentValues().apply {
-                message.id?.let { put(COLUMN_ID, it) }
-                put(COLUMN_SENDER_ID, message.senderId)
-                put(COLUMN_SENDER_NAME, message.senderName)
-                put(COLUMN_CONTENT, message.content)
-                put(COLUMN_TYPE, message.type.name)
-                put(COLUMN_FILE_URL, message.fileUrl)
-                put(COLUMN_TIMESTAMP, message.timestamp?.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
-                put(COLUMN_CHAT_TYPE, chatType)
-                receiverId?.let { put(COLUMN_RECEIVER_ID, it) }
-                groupId?.let { put(COLUMN_GROUP_ID, it) }
+                message.id?.let { put("id", it) }
+                put("sender_id", message.senderId)
+                put("sender_name", message.senderName)
+                put("content", message.content)
+                put("type", message.type.name)
+                put("file_url", message.fileUrl)
+                put("timestamp", message.timestamp?.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
+                put("chat_type", chatType)
+                receiverId?.let { put("receiver_id", it) }
+                groupId?.let { put("group_id", it) }
             }
 
-            val result = db.insertWithOnConflict(TABLE_MESSAGES, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+            val result = db.insertWithOnConflict("messages", null, values, SQLiteDatabase.CONFLICT_REPLACE)
             
             if (result != -1L) {
                 db.setTransactionSuccessful()
@@ -117,17 +53,20 @@ class ChatDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
     }
 
     fun deleteMessage(messageId: Long): Boolean {
-        val rowsAffected = writableDatabase.delete(
-            TABLE_MESSAGES,
-            "$COLUMN_MESSAGE_ID = ?",
+        val db = dbHelper.writableDatabase
+        val rowsAffected = db.delete(
+            "messages",
+            "id = ?",
             arrayOf(messageId.toString())
         )
+        db.close()
         return rowsAffected > 0 // 返回是否成功删除
     }
 
     fun markMessageAsDeleted(messageId: Long, userId: Long): Boolean {
-        val cursor = writableDatabase.query(
-            TABLE_MESSAGES,
+        val db = dbHelper.writableDatabase
+        val cursor = db.query(
+            "messages",
             arrayOf("deleted_by"),
             "id = ?",
             arrayOf(messageId.toString()),
@@ -148,20 +87,22 @@ class ChatDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
                 put("deleted_by", newDeletedBy)
             }
 
-            writableDatabase.update(
-                TABLE_MESSAGES,
+            db.update(
+                "messages",
                 values,
                 "id = ?",
                 arrayOf(messageId.toString())
             )
         }
         cursor.close()
+        db.close()
         return true
     }
 
     fun isMessageDeletedForUser(messageId: Long, userId: Long): Boolean {
-        val cursor = readableDatabase.query(
-            TABLE_MESSAGES,
+        val db = dbHelper.readableDatabase
+        val cursor = db.query(
+            "messages",
             arrayOf("deleted_by"),
             "id = ?",
             arrayOf(messageId.toString()),
@@ -170,150 +111,173 @@ class ChatDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
             null
         )
 
-        return if (cursor.moveToFirst()) {
+        val result = if (cursor.moveToFirst()) {
             val deletedBy = cursor.getString(0) ?: ""
             val deletedUsers = deletedBy.split(",").filter { it.isNotEmpty() }.map { it.toLong() }
-            cursor.close()
             userId in deletedUsers
         } else {
-            cursor.close()
             false
         }
-    }
-
-    fun getMessages(): List<ChatMessage> {
-        val messages = mutableListOf<ChatMessage>()
-        val db = this.readableDatabase
-        val cursor = db.query(
-            TABLE_MESSAGES,
-            null,
-            null,
-            null,
-            null,
-            null,
-            "$COLUMN_TIMESTAMP ASC"
-        )
-
-        with(cursor) {
-            while (moveToNext()) {
-                val message = ChatMessage(
-                    id = getLong(getColumnIndexOrThrow(COLUMN_ID)),
-                    senderId = getLong(getColumnIndexOrThrow(COLUMN_SENDER_ID)),
-                    senderName = getString(getColumnIndexOrThrow(COLUMN_SENDER_NAME)),
-                    content = getString(getColumnIndexOrThrow(COLUMN_CONTENT)),
-                    type = MessageType.valueOf(getString(getColumnIndexOrThrow(COLUMN_TYPE))),
-                    fileUrl = getString(getColumnIndexOrThrow(COLUMN_FILE_URL)),
-                    timestamp = LocalDateTime.parse(
-                        getString(getColumnIndexOrThrow(COLUMN_TIMESTAMP)),
-                        DateTimeFormatter.ISO_LOCAL_DATE_TIME
-                    )
-                )
-                messages.add(message)
-            }
-        }
+        
         cursor.close()
         db.close()
-        return messages
+        return result
     }
 
     fun clearMessages() {
-        val db = this.writableDatabase
-        db.delete(TABLE_MESSAGES, null, null)
+        val db = dbHelper.writableDatabase
+        db.delete("messages", null, null)
         db.close()
     }
 
-    fun getPrivateMessages(userId1: Long, userId2: Long): List<ChatMessage> {
+    fun getPrivateMessages(userId: Long, partnerId: Long): List<ChatMessage> {
         val messages = mutableListOf<ChatMessage>()
-        val cursor = readableDatabase.query(
-            TABLE_MESSAGES,
-            null,
-            "chat_type = 'private' AND ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))",
-            arrayOf(userId1.toString(), userId2.toString(), userId2.toString(), userId1.toString()),
-            null,
-            null,
-            "timestamp ASC"
+        val db = dbHelper.readableDatabase
+        
+        val selection = "(sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)"
+        val selectionArgs = arrayOf(
+            userId.toString(), partnerId.toString(),
+            partnerId.toString(), userId.toString()
         )
-
-        while (cursor.moveToNext()) {
-            val messageId = cursor.getLong(cursor.getColumnIndexOrThrow("id"))
-            if (!isMessageDeletedForUser(messageId, userId1)) {
-                messages.add(createMessageFromCursor(cursor))
-            }
-        }
-        cursor.close()
-        return messages
-    }
-
-    fun getGroupMessages(groupId: Long): List<ChatMessage> {
-        val messages = mutableListOf<ChatMessage>()
-        val db = this.readableDatabase
-        val selection = "$COLUMN_CHAT_TYPE = 'group' AND $COLUMN_GROUP_ID = ?"
-        val selectionArgs = arrayOf(groupId.toString())
         
         val cursor = db.query(
-            TABLE_MESSAGES,
+            "messages",
             null,
             selection,
             selectionArgs,
             null,
             null,
-            "$COLUMN_TIMESTAMP ASC"
+            "timestamp ASC"
         )
-
-        cursor.use {
-            while (it.moveToNext()) {
-                messages.add(createMessageFromCursor(it))
+        
+        while (cursor.moveToNext()) {
+            val id = cursor.getLong(cursor.getColumnIndexOrThrow("id"))
+            val senderId = cursor.getLong(cursor.getColumnIndexOrThrow("sender_id"))
+            val senderName = cursor.getString(cursor.getColumnIndexOrThrow("sender_name"))
+            val content = cursor.getString(cursor.getColumnIndexOrThrow("content"))
+            val typeStr = cursor.getString(cursor.getColumnIndexOrThrow("type"))
+            val receiverId = cursor.getLong(cursor.getColumnIndexOrThrow("receiver_id"))
+            val receiverName = cursor.getString(cursor.getColumnIndexOrThrow("receiver_name"))
+            val timestampStr = cursor.getString(cursor.getColumnIndexOrThrow("timestamp"))
+            val fileUrl = cursor.getString(cursor.getColumnIndexOrThrow("file_url"))
+            
+            val timestamp = try {
+                LocalDateTime.parse(timestampStr)
+            } catch (e: Exception) {
+                LocalDateTime.now()
             }
+            
+            val message = ChatMessage(
+                id = id,
+                senderId = senderId,
+                senderName = senderName,
+                content = content,
+                type = MessageType.valueOf(typeStr),
+                receiverId = receiverId,
+                receiverName = receiverName,
+                groupId = null,
+                groupName = null,
+                timestamp = timestamp,
+                fileUrl = fileUrl,
+                chatType = "PRIVATE"
+            )
+            
+            messages.add(message)
         }
+        
+        cursor.close()
         db.close()
+        
         return messages
     }
 
-    private fun createMessageFromCursor(cursor: android.database.Cursor): ChatMessage {
-        return ChatMessage(
-            id = cursor.getLong(cursor.getColumnIndexOrThrow(COLUMN_ID)),
-            senderId = cursor.getLong(cursor.getColumnIndexOrThrow(COLUMN_SENDER_ID)),
-            senderName = cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_SENDER_NAME)),
-            content = cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_CONTENT)),
-            type = MessageType.valueOf(cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_TYPE))),
-            fileUrl = cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_FILE_URL)),
-            timestamp = LocalDateTime.parse(
-                cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_TIMESTAMP)),
-                DateTimeFormatter.ISO_LOCAL_DATE_TIME
-            )
+    fun getGroupMessages(groupId: Long): List<ChatMessage> {
+        val messages = mutableListOf<ChatMessage>()
+        val db = dbHelper.readableDatabase
+        
+        val selection = "group_id = ?"
+        val selectionArgs = arrayOf(groupId.toString())
+        
+        val cursor = db.query(
+            "messages",
+            null,
+            selection,
+            selectionArgs,
+            null,
+            null,
+            "timestamp ASC"
         )
+        
+        while (cursor.moveToNext()) {
+            val id = cursor.getLong(cursor.getColumnIndexOrThrow("id"))
+            val senderId = cursor.getLong(cursor.getColumnIndexOrThrow("sender_id"))
+            val senderName = cursor.getString(cursor.getColumnIndexOrThrow("sender_name"))
+            val content = cursor.getString(cursor.getColumnIndexOrThrow("content"))
+            val typeStr = cursor.getString(cursor.getColumnIndexOrThrow("type"))
+            val timestampStr = cursor.getString(cursor.getColumnIndexOrThrow("timestamp"))
+            val fileUrl = cursor.getString(cursor.getColumnIndexOrThrow("file_url"))
+            val groupName = cursor.getString(cursor.getColumnIndexOrThrow("group_name"))
+            
+            val timestamp = try {
+                LocalDateTime.parse(timestampStr)
+            } catch (e: Exception) {
+                LocalDateTime.now()
+            }
+            
+            val message = ChatMessage(
+                id = id,
+                senderId = senderId,
+                senderName = senderName,
+                content = content,
+                type = MessageType.valueOf(typeStr),
+                receiverId = null,
+                receiverName = null,
+                groupId = groupId,
+                groupName = groupName,
+                timestamp = timestamp,
+                fileUrl = fileUrl,
+                chatType = "GROUP"
+            )
+            
+            messages.add(message)
+        }
+        
+        cursor.close()
+        db.close()
+        
+        return messages
     }
 
     fun clearPrivateMessages(userId1: Long, userId2: Long) {
-        val db = this.writableDatabase
+        val db = dbHelper.writableDatabase
         val whereClause = """
-            $COLUMN_CHAT_TYPE = 'private' AND 
-            (($COLUMN_SENDER_ID = ? AND $COLUMN_RECEIVER_ID = ?) OR 
-            ($COLUMN_SENDER_ID = ? AND $COLUMN_RECEIVER_ID = ?))
+            chat_type = 'private' AND 
+            ((sender_id = ? AND receiver_id = ?) OR 
+            (sender_id = ? AND receiver_id = ?))
         """.trimIndent()
         val whereArgs = arrayOf(
             userId1.toString(), userId2.toString(),
             userId2.toString(), userId1.toString()
         )
-        db.delete(TABLE_MESSAGES, whereClause, whereArgs)
+        db.delete("messages", whereClause, whereArgs)
         db.close()
     }
 
     fun clearGroupMessages(groupId: Long) {
-        val db = this.writableDatabase
-        val whereClause = "$COLUMN_CHAT_TYPE = 'group' AND $COLUMN_GROUP_ID = ?"
+        val db = dbHelper.writableDatabase
+        val whereClause = "chat_type = 'group' AND group_id = ?"
         val whereArgs = arrayOf(groupId.toString())
-        db.delete(TABLE_MESSAGES, whereClause, whereArgs)
+        db.delete("messages", whereClause, whereArgs)
         db.close()
     }
 
     // 添加一个方法来验证消息是否存在
     fun isMessageExists(messageId: Long): Boolean {
-        val db = this.readableDatabase
+        val db = dbHelper.readableDatabase
         val cursor = db.query(
-            TABLE_MESSAGES,
-            arrayOf(COLUMN_ID),
-            "$COLUMN_ID = ?",
+            "messages",
+            arrayOf("id"),
+            "id = ?",
             arrayOf(messageId.toString()),
             null,
             null,
@@ -328,33 +292,66 @@ class ChatDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
 
     // 添加更新用户头像的方法
     fun updateUserAvatar(userId: Long, avatarUrl: String) {
-        writableDatabase.use { db ->
-            val values = ContentValues().apply {
-                put("avatar_url", avatarUrl)
-            }
-            db.update(TABLE_USERS, values, "id = ?", arrayOf(userId.toString()))
+        val db = dbHelper.writableDatabase
+        val values = ContentValues().apply {
+            put("avatar_url", avatarUrl)
         }
+        db.update("users", values, "id = ?", arrayOf(userId.toString()))
+        db.close()
     }
 
     // 获取用户头像URL的方法
     fun getUserAvatarUrl(userId: Long): String? {
-        readableDatabase.use { db ->
-            val cursor = db.query(
-                TABLE_USERS,
-                arrayOf("avatar_url"),
-                "id = ?",
-                arrayOf(userId.toString()),
-                null,
-                null,
-                null
-            )
-            return cursor.use {
-                if (it.moveToFirst()) {
-                    it.getString(it.getColumnIndexOrThrow("avatar_url"))
-                } else {
-                    null
-                }
-            }
+        val db = dbHelper.readableDatabase
+        val cursor = db.query(
+            "users",
+            arrayOf("avatar_url"),
+            "id = ?",
+            arrayOf(userId.toString()),
+            null,
+            null,
+            null
+        )
+        
+        val result = if (cursor.moveToFirst()) {
+            cursor.getString(cursor.getColumnIndexOrThrow("avatar_url"))
+        } else {
+            null
         }
+        
+        cursor.close()
+        db.close()
+        return result
+    }
+
+    fun insertMessage(message: ChatMessage): Long {
+        val db = dbHelper.writableDatabase
+        val values = ContentValues().apply {
+            put("sender_id", message.senderId)
+            put("sender_name", message.senderName)
+            put("content", message.content)
+            put("type", message.type.toString())
+            put("timestamp", message.timestamp.toString())
+            
+            // 根据消息类型设置不同的字段
+            if (message.chatType == "PRIVATE") {
+                put("receiver_id", message.receiverId)
+                put("receiver_name", message.receiverName)
+                putNull("group_id")
+                putNull("group_name")
+            } else {
+                putNull("receiver_id")
+                putNull("receiver_name")
+                put("group_id", message.groupId)
+                put("group_name", message.groupName)
+            }
+            
+            put("file_url", message.fileUrl)
+            put("chat_type", message.chatType)
+        }
+        
+        val id = db.insert("messages", null, values)
+        db.close()
+        return id
     }
 } 

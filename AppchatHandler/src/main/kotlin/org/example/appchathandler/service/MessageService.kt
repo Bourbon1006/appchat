@@ -107,11 +107,23 @@ class MessageService(
         return messageRepository.findByDateRange(user, startDate, endDate)
     }
 
-    fun searchMessages(userId: Long, keyword: String): List<Message> {
-        val user = userRepository.findById(userId).orElseThrow {
-            IllegalArgumentException("User with id $userId not found")
+    fun searchMessages(userId: Long, keyword: String): List<MessageDTO> {
+        return messageRepository.searchMessages(userId, keyword).map { message ->
+            MessageDTO(
+                id = message.id,
+                content = message.content,
+                timestamp = message.timestamp,
+                senderId = message.sender.id,
+                senderName = message.sender.username,
+                senderNickname = message.sender.nickname,
+                receiverId = message.receiver?.id,
+                receiverName = message.receiver?.username,
+                groupId = message.group?.id,
+                groupName = message.group?.name,
+                type = message.type,
+                fileUrl = message.fileUrl
+            )
         }
-        return messageRepository.searchMessages(user, "%$keyword%")
     }
 
     fun getPrivateMessagesByDateRange(

@@ -3,20 +3,37 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:padding="8dp"
-    android:background="?android:attr/selectableItemBackground">
+    android:padding="16dp">
 
     <TextView
-        android:id="@+id/messageText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="16sp" />
-
-    <TextView
-        android:id="@+id/timeText"
+        android:id="@+id/chatType"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
+        android:textColor="@color/text_secondary"
+        android:textSize="14sp" />
+
+    <TextView
+        android:id="@+id/messageSender"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="@color/text_primary"
+        android:textSize="16sp"
+        android:layout_marginTop="4dp" />
+
+    <TextView
+        android:id="@+id/messageContent"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="@color/text_primary"
+        android:textSize="16sp"
+        android:layout_marginTop="8dp" />
+
+    <TextView
+        android:id="@+id/messageTime"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="@color/text_secondary"
         android:textSize="12sp"
-        android:textColor="@android:color/darker_gray" />
-</LinearLayout> 
+        android:layout_marginTop="4dp" />
+
+</LinearLayout>

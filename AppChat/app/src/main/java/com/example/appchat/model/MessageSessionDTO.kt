@@ -17,11 +17,11 @@ data class MessageSessionDTO(
             id = id,
             partnerId = partnerId,
             partnerName = partnerName,
+            partnerAvatar = partnerAvatar,
             lastMessage = lastMessage,
-            lastMessageTime = lastMessageTime,
+            lastMessageTime = lastMessageTime.toString(),
             unreadCount = unreadCount,
-            type = type,
-            partnerAvatar = partnerAvatar
+            type = type
         )
     }
 } 

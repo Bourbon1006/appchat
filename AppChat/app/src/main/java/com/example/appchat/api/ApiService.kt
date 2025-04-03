@@ -1,5 +1,6 @@
 package com.example.appchat.api
 
+import FriendGroup
 import GroupMember
 import com.example.appchat.model.*
 import com.example.appchat.model.CreateGroupRequest
@@ -47,7 +48,7 @@ interface ApiService {
     @POST("api/groups")
     fun createGroup(@Body request: CreateGroupRequest): Call<Group>
 
-    @GET("groups/{groupId}")
+    @GET("api/groups/{groupId}")
     fun getGroupById(@Path("groupId") groupId: Long): Call<Group>
 
     @POST("api/groups/{groupId}/members/{userId}")
@@ -284,6 +285,44 @@ interface ApiService {
         @Query("requestId") requestId: Long,
         @Query("accept") accept: Boolean = false
     ): Response<Unit>
+
+    @POST("/api/friend-groups")
+    suspend fun createFriendGroup(
+        @Query("userId") userId: Long,
+        @Query("name") name: String
+    ): Response<ContactGroup>
+
+    @DELETE("/api/friend-groups/{groupId}")
+    suspend fun deleteFriendGroup(
+        @Path("groupId") groupId: Long,
+        @Query("userId") userId: Long
+    ): Response<Unit>
+
+    @PUT("/api/friend-groups/{groupId}/name")
+    suspend fun updateFriendGroupName(
+        @Path("groupId") groupId: Long,
+        @Query("userId") userId: Long,
+        @Query("newName") newName: String
+    ): Response<ContactGroup>
+
+    @POST("/api/friend-groups/{groupId}/members/{friendId}")
+    suspend fun addFriendToGroup(
+        @Path("groupId") groupId: Long,
+        @Path("friendId") friendId: Long,
+        @Query("userId") userId: Long
+    ): Response<ContactGroup>
+
+    @DELETE("/api/friend-groups/{groupId}/members/{friendId}")
+    suspend fun removeFriendFromGroup(
+        @Path("groupId") groupId: Long,
+        @Path("friendId") friendId: Long,
+        @Query("userId") userId: Long
+    ): Response<ContactGroup>
+
+    @GET("/api/friend-groups")
+    suspend fun getFriendGroups(
+        @Query("userId") userId: Long
+    ): Response<List<FriendGroup>>
 }
 
 data class DeleteMessageResponse(

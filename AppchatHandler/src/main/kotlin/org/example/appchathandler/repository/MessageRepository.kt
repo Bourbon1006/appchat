@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository
 import java.time.LocalDateTime
 import org.example.appchathandler.dto.MessageSessionInfo
 import org.springframework.data.jpa.repository.Modifying
+import org.example.appchathandler.dto.MessageDTO
 
 @Repository
 interface MessageRepository : JpaRepository<Message, Long> {
@@ -57,11 +58,21 @@ interface MessageRepository : JpaRepository<Message, Long> {
 
     @Query("""
         SELECT m FROM Message m 
-        WHERE (m.sender = :user OR m.receiver = :user OR :user MEMBER OF m.group.members)
-        AND LOWER(m.content) LIKE LOWER(:keyword)
+        WHERE (
+            (m.group IS NULL AND (m.sender.id = :userId OR m.receiver.id = :userId))
+            OR 
+            (m.group IS NOT NULL AND m.group.id IN 
+                (SELECT g.id FROM Group g JOIN g.members mem WHERE mem.id = :userId)
+            )
+        )
+        AND :userId NOT MEMBER OF m.deletedForUsers
+        AND LOWER(m.content) LIKE LOWER(CONCAT('%', :keyword, '%'))
         ORDER BY m.timestamp DESC
     """)
-    fun searchMessages(user: User, keyword: String): List<Message>
+    fun searchMessages(
+        @Param("userId") userId: Long,
+        @Param("keyword") keyword: String
+    ): List<Message>
 
     @Query("""
         SELECT m FROM Message m 
@@ -175,7 +186,7 @@ interface MessageRepository : JpaRepository<Message, Long> {
             END as message_type,
             COUNT(*) as unread_count
         FROM messages m
-        LEFT JOIN message_deleted_users mdf ON m.id = mdf.message_id AND mdf.user_id = :userId
+        LEFT JOIN message_deletions mdf ON m.id = mdf.message_id AND mdf.user_id = :userId
         WHERE m.id NOT IN (
             SELECT mrb.message_id
             FROM message_read_status mrb

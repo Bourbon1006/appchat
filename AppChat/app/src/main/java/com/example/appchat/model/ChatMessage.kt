@@ -6,17 +6,17 @@ import com.google.gson.stream.JsonWriter
 import java.time.LocalDateTime
 
 data class ChatMessage(
-    val id: Long? = null,
-    val content: String,
+    val id: Long?,
     val senderId: Long,
     val senderName: String,
-    val senderNickname: String? = null,
-    val receiverId: Long? = null,
-    val receiverName: String? = null,
-    val groupId: Long? = null,
-    val type: MessageType = MessageType.TEXT,
-    val fileUrl: String? = null,
-    val timestamp: LocalDateTime? = null,
+    val content: String,
+    val type: MessageType,
+    val receiverId: Long?,
+    val receiverName: String?,
+    val groupId: Long?,
+    val groupName: String?,
+    val timestamp: LocalDateTime?,
+    val fileUrl: String?,
     val chatType: String = if (groupId != null) "GROUP" else "PRIVATE"
 )
 

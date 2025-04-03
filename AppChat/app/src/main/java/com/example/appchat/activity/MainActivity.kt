@@ -1,13 +1,13 @@
 package com.example.appchat.activity
 
 import android.app.AlertDialog
+import android.app.Dialog
 import android.content.Intent
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import android.view.inputmethod.EditorInfo
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.widget.Toolbar
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.appchat.adapter.SearchUserAdapter
@@ -19,30 +19,28 @@ import retrofit2.Response
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
-import com.bumptech.glide.Glide
-import com.bumptech.glide.request.RequestOptions
 import com.example.appchat.model.UserDTO
 import android.os.Handler
 import android.os.Looper
-import com.bumptech.glide.load.engine.DiskCacheStrategy
 import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.IntentFilter
 import android.widget.*
 import com.example.appchat.fragment.ContactsFragment
 import com.example.appchat.fragment.MessageDisplayFragment
 import com.example.appchat.websocket.WebSocketManager
 import androidx.fragment.app.Fragment
 import org.json.JSONObject
-import org.greenrobot.eventbus.Subscribe
-import org.greenrobot.eventbus.ThreadMode
-import com.example.appchat.api.RetrofitClient
 import android.util.Log
+import android.view.View
 import com.example.appchat.R
+import com.example.appchat.adapter.ContactSelectionAdapter
+import com.example.appchat.adapter.SearchResultAdapter
 import com.example.appchat.databinding.ActivityMainBinding
 import com.example.appchat.fragment.MomentsFragment
 import kotlinx.coroutines.Dispatchers
 import com.example.appchat.fragment.MeFragment
+import com.example.appchat.model.ChatMessage
+import com.example.appchat.model.CreateGroupRequest
+import com.example.appchat.model.Group
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.coroutineScope
 
@@ -53,16 +51,8 @@ class MainActivity : AppCompatActivity() {
         get() = _binding!!
 
     private var currentUserId: Long = -1
-    private lateinit var toolbar: Toolbar
-    private lateinit var deleteButton: ImageButton
-    private var deleteCallback: (() -> Unit)? = null
     private val apiService = ApiClient.apiService
-    private var pendingRequestCount = 0
-    private val pendingRequestCountListener: (Int) -> Unit = { count ->
-        pendingRequestCount = count
-        updateContactsBadge()
-    }
-
+/*    private var pendingRequestCount = 0*/
     private var avatarRefreshReceiver: BroadcastReceiver? = null
     private var isReceiverRegistered = false
 
@@ -139,7 +129,7 @@ class MainActivity : AppCompatActivity() {
             .commit()
     }
 
-    private fun setupToolbar() {
+/*    private fun setupToolbar() {
         toolbar = findViewById(R.id.toolbar)
         setSupportActionBar(toolbar)
         supportActionBar?.apply {
@@ -164,7 +154,7 @@ class MainActivity : AppCompatActivity() {
         toolbarAvatar.setOnClickListener {
             startActivity(Intent(this, ProfileActivity::class.java))
         }
-    }
+    }*/
 
     private fun setupBottomNavigation() {
         binding.bottomNavigation.setOnItemSelectedListener { item ->
@@ -191,7 +181,32 @@ class MainActivity : AppCompatActivity() {
 
         // 设置默认选中项
         binding.bottomNavigation.selectedItemId = R.id.navigation_chat
+        
+        // 初始化时加载待处理的好友请求数量
+        updatePendingRequestCount()
+        
+        // 添加 WebSocket 监听器
+        WebSocketManager.addFriendRequestListener {
+            // 收到新的好友请求时更新角标
+            updatePendingRequestCount()
+        }
     }
+
+    /*// 提供公共方法供 ContactsFragment 在处理完好友请求后调用
+    fun onFriendRequestHandled() {
+        // 获取当前角标
+        val badge = binding.bottomNavigation.getBadge(R.id.navigation_contacts)
+        if (badge != null) {
+            val currentCount = badge.number
+            if (currentCount > 1) {
+                // 如果还有其他未处理的请求，减少数量
+                badge.number = currentCount - 1
+            } else {
+                // 如果这是最后一个请求，移除角标
+                binding.bottomNavigation.removeBadge(R.id.navigation_contacts)
+            }
+        }
+    }*/
 
     private fun loadFragment(fragment: Fragment) {
         // 先检查当前显示的是否就是要切换到的 Fragment
@@ -206,7 +221,7 @@ class MainActivity : AppCompatActivity() {
             .commit()
     }
 
-    private fun setupAvatarRefreshReceiver() {
+    /*private fun setupAvatarRefreshReceiver() {
         avatarRefreshReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 if (intent.action == "com.example.appchat.AVATAR_UPDATED") {
@@ -236,7 +251,7 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             println("❌ Failed to register avatar refresh receiver: ${e.message}")
         }
-    }
+    }*/
 
     override fun onDestroy() {
         try {
@@ -257,7 +272,7 @@ class MainActivity : AppCompatActivity() {
         _binding = null
     }
 
-    @Subscribe(threadMode = ThreadMode.MAIN)
+    /*@Subscribe(threadMode = ThreadMode.MAIN)
     fun onSessionUpdate(@Suppress("UNUSED_PARAMETER") event: ChatActivity.SessionUpdateEvent) {
         // 收到会话更新事件，刷新会话列表
         loadMessageSessions()
@@ -283,17 +298,137 @@ class MainActivity : AppCompatActivity() {
                 Log.e("MainActivity", "Error loading sessions", e)
             }
         }
-    }
+    }*/
 
     // 添加菜单相关的对话框方法
     private fun showSearchMessagesDialog() {
-        // TODO: 实现搜索消息对话框
+        val dialogView = layoutInflater.inflate(R.layout.dialog_search_messages, null)
+        val searchInput = dialogView.findViewById<EditText>(R.id.searchInput)
+        val resultsList = dialogView.findViewById<RecyclerView>(R.id.searchResults)
+        val progressBar = dialogView.findViewById<ProgressBar>(R.id.progressBar)
+        
+        resultsList.layoutManager = LinearLayoutManager(this)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("全局搜索")
+            .setView(dialogView)
+            .create()
+
+        searchInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                val query = searchInput.text.toString()
+                if (query.isNotEmpty()) {
+                    progressBar.visibility = View.VISIBLE
+                    searchGlobalMessages(query, resultsList, progressBar, dialog)
+                }
+                true
+            } else {
+                false
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun searchGlobalMessages(query: String, resultsList: RecyclerView, progressBar: ProgressBar, dialog: Dialog) {
+        val userId = UserPreferences.getUserId(this)
+        
+        Log.d("SearchMessages", "Searching for: $query, userId: $userId")
+        
+        ApiClient.apiService.searchMessages(userId, query).enqueue(object : Callback<List<ChatMessage>> {
+            override fun onResponse(call: Call<List<ChatMessage>>, response: Response<List<ChatMessage>>) {
+                progressBar.visibility = View.GONE
+                if (response.isSuccessful) {
+                    val messages = response.body() ?: emptyList()
+                    
+                    val searchResults = messages.mapIndexed { index, message -> 
+                        Pair(message, index)
+                    }
+                    
+                    val adapter = SearchResultAdapter(
+                        context = this@MainActivity,
+                        messages = searchResults,
+                        onItemClick = { position ->
+                            val message = messages[position]
+                            // 关闭搜索对话框
+                            dialog.dismiss()
+                            
+                            // 根据消息类型打开对应的聊天界面
+                            when {
+                                message.groupId != null -> {
+                                    startChatActivity(
+                                        chatType = "GROUP",
+                                        groupId = message.groupId,
+                                        groupName = message.groupName,
+                                        highlightMessageId = message.id
+                                    )
+                                }
+                                else -> {
+                                    val partnerId = if (message.senderId == userId) 
+                                        message.receiverId else message.senderId
+                                    val partnerName = if (message.senderId == userId) 
+                                        message.receiverName else message.senderName
+                                    
+                                    if (partnerId != null) {
+                                        startChatActivity(
+                                            chatType = "PRIVATE",
+                                            partnerId = partnerId,
+                                            receiverName = partnerName,
+                                            highlightMessageId = message.id
+                                        )
+                                    } else {
+                                        Log.e("SearchMessages", "Invalid private chat: partnerId is null")
+                                        Toast.makeText(this@MainActivity, "无效的私聊消息", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        }
+                    )
+                    
+                    resultsList.adapter = adapter
+                } else {
+                    val errorBody = response.errorBody()?.string()
+                    Log.e("SearchMessages", "Search failed: $errorBody")
+                    Toast.makeText(this@MainActivity, "搜索失败", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            override fun onFailure(call: Call<List<ChatMessage>>, t: Throwable) {
+                progressBar.visibility = View.GONE
+                Log.e("SearchMessages", "Network error", t)
+                Toast.makeText(this@MainActivity, "网络错误: ${t.message}", Toast.LENGTH_SHORT).show()
+            }
+        })
+    }
+
+    private fun startChatActivity(
+        chatType: String,
+        partnerId: Long? = null,
+        groupId: Long? = null,
+        groupName: String? = null,
+        receiverName: String? = null,
+        highlightMessageId: Long? = null
+    ) {
+        val intent = Intent(this, ChatActivity::class.java).apply {
+            putExtra("chat_type", chatType)
+            if (chatType == "PRIVATE") {
+                putExtra("receiver_id", partnerId)
+                putExtra("receiver_name", receiverName)
+            } else {
+                putExtra("receiver_id", groupId)
+                putExtra("receiver_name", groupName)
+            }
+            highlightMessageId?.let {
+                putExtra("highlight_message_id", it)
+            }
+        }
+        startActivity(intent)
     }
 
     private fun sendFriendRequest(receiverId: Long) {
         try {
             val userId = UserPreferences.getUserId(this)
-            
+
             // 如果 WebSocket 未连接，先初始化
             if (!WebSocketManager.isConnected()) {
                 WebSocketManager.init(
@@ -319,7 +454,7 @@ class MainActivity : AppCompatActivity() {
             put("senderId", userId)
             put("receiverId", receiverId)
         }.toString()
-        
+
         WebSocketManager.sendFriendRequest(requestJson,
             onSuccess = {
                 runOnUiThread {
@@ -382,17 +517,74 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun showProfileDialog() {
-        startActivity(Intent(this, ProfileActivity::class.java))
-    }
-
     private fun showCreateGroupDialog() {
-        // TODO: 实现创建群聊对话框
+        val dialogView = layoutInflater.inflate(R.layout.dialog_create_group, null)
+        val nameInput = dialogView.findViewById<EditText>(R.id.groupNameInput)
+        val contactsList = dialogView.findViewById<RecyclerView>(R.id.contactsList)
+        val createButton = dialogView.findViewById<Button>(R.id.createButton)
+
+        // 设置联系人列表
+        val contactsAdapter = ContactSelectionAdapter()
+        contactsList.apply {
+            layoutManager = LinearLayoutManager(this@MainActivity)
+            adapter = contactsAdapter
+        }
+
+        // 加载联系人
+        ApiClient.apiService.getUserContacts(UserPreferences.getUserId(this))
+            .enqueue(object : Callback<List<UserDTO>> {
+                override fun onResponse(call: Call<List<UserDTO>>, response: Response<List<UserDTO>>) {
+                    if (response.isSuccessful) {
+                        response.body()?.let { contacts ->
+                            contactsAdapter.updateContacts(contacts)
+                        }
+                    }
+                }
+
+                override fun onFailure(call: Call<List<UserDTO>>, t: Throwable) {
+                    Toast.makeText(this@MainActivity, "加载联系人失败", Toast.LENGTH_SHORT).show()
+                }
+            })
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("创建群组")
+            .setView(dialogView)
+            .create()
+
+        createButton.setOnClickListener {
+            val groupName = nameInput.text.toString().trim()
+            val selectedMembers = contactsAdapter.getSelectedContacts()
+            
+            if (groupName.isNotEmpty() && selectedMembers.isNotEmpty()) {
+                val request = CreateGroupRequest(
+                    name = groupName,
+                    creatorId = UserPreferences.getUserId(this),
+                    memberIds = selectedMembers.map { it.id }
+                )
+
+                ApiClient.apiService.createGroup(request)
+                    .enqueue(object : Callback<Group> {
+                        override fun onResponse(call: Call<Group>, response: Response<Group>) {
+                            if (response.isSuccessful) {
+                                Toast.makeText(this@MainActivity, "群组创建成功", Toast.LENGTH_SHORT).show()
+                                dialog.dismiss()
+                            } else {
+                                Toast.makeText(this@MainActivity, "创建群组失败", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+
+                        override fun onFailure(call: Call<Group>, t: Throwable) {
+                            Toast.makeText(this@MainActivity, "网络错误", Toast.LENGTH_SHORT).show()
+                        }
+                    })
+            } else {
+                Toast.makeText(this, "请输入群组名称并选择成员", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        dialog.show()
     }
 
-    private fun showDeleteMessagesDialog() {
-        // TODO: 实现删除消息对话框
-    }
 
     private fun showLogoutConfirmDialog() {
         AlertDialog.Builder(this)
@@ -424,10 +616,6 @@ class MainActivity : AppCompatActivity() {
                 showSearchUsersDialog()
                 true
             }
-            R.id.menu_profile -> {
-                showProfileDialog()
-                true
-            }
             R.id.menu_group_chat -> {
                 showCreateGroupDialog()
                 true
@@ -453,7 +641,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateContactsBadge() {
+    /*private fun updateContactsBadge() {
         val badge = binding.bottomNavigation.getOrCreateBadge(R.id.navigation_contacts)
         if (pendingRequestCount > 0) {
             badge.apply {
@@ -464,7 +652,11 @@ class MainActivity : AppCompatActivity() {
         } else {
             badge.isVisible = false
         }
-    }
+    }*/
+
+    /*private fun clearContactsBadge() {
+        binding.bottomNavigation.removeBadge(R.id.navigation_contacts)
+    }*/
 
     private fun updatePendingRequestCount() {
         println("⭐ Updating pending request count for user: $currentUserId")
@@ -475,26 +667,21 @@ class MainActivity : AppCompatActivity() {
                     val requests = response.body() ?: emptyList()
                     println("✅ Found ${requests.size} pending requests")
                     
-                    // 重要：不要使用runOnUiThread，因为lifecycleScope已经保证了在主线程回调
-                    // 存储计数以供其他地方使用
-                    pendingRequestCount = requests.size
-                    
-                    // 更新UI
-                    val badge = binding.bottomNavigation.getOrCreateBadge(R.id.navigation_contacts)
-                    if (requests.isNotEmpty()) {
-                        badge.isVisible = true
-                        badge.number = requests.size
-                        badge.backgroundColor = ContextCompat.getColor(this@MainActivity, R.color.red)
-                        println("📝 Updated badge: count=${requests.size}")
-                    } else {
-                        badge.isVisible = false
-                        println("📝 Hidden badge: no pending requests")
-                    }
-                    
-                    // 通知所有打开的 Fragment 更新它们的UI
-                    val fragment = supportFragmentManager.findFragmentById(R.id.fragmentContainer)
-                    if (fragment is ContactsFragment) {
-                        fragment.updatePendingRequestCountUI(requests.size)
+                    // 在主线程更新UI
+                    withContext(Dispatchers.Main) {
+                        if (requests.isNotEmpty()) {
+                            val badge = binding.bottomNavigation.getOrCreateBadge(R.id.navigation_contacts)
+                            badge.apply {
+                                isVisible = true
+                                number = requests.size
+                                backgroundColor = ContextCompat.getColor(this@MainActivity, R.color.red)
+                            }
+                            println("📝 Updated badge: count=${requests.size}")
+                        } else {
+                            // 如果没有待处理的请求，移除角标
+                            binding.bottomNavigation.removeBadge(R.id.navigation_contacts)
+                            println("📝 Hidden badge: no pending requests")
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -503,22 +690,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateFriendRequestBadge(count: Int) {
-        val badge = binding.bottomNavigation.getOrCreateBadge(R.id.navigation_contacts)
-        if (count > 0) {
-            badge.isVisible = true
-            badge.number = count
-        } else {
-            badge.isVisible = false
-        }
+    override fun onResume() {
+        super.onResume()
+        // 每次回到应用时更新角标
+        updatePendingRequestCount()
     }
 
-    private fun setupWebSocket() {
+    /*private fun setupWebSocket() {
         WebSocketManager.init(
             context = this,
             userId = currentUserId.toString()
         )
-    }
+    }*/
 
     // 添加公共方法供 Fragment 调用
     fun refreshPendingRequests() {
@@ -526,23 +709,23 @@ class MainActivity : AppCompatActivity() {
         updatePendingRequestCount()
     }
 
-    // 修复其他调用 WebSocketManager.init 的地方
+    /*// 修复其他调用 WebSocketManager.init 的地方
     private fun reconnectWebSocket() {
         WebSocketManager.init(
             context = this,
             userId = currentUserId.toString()
         )
-    }
+    }*/
 
-    private fun handleWebSocketReconnect(serverUrl: String, userId: Long) {
+    /*private fun handleWebSocketReconnect(serverUrl: String, userId: Long) {
         WebSocketManager.init(
             context = this,
             userId = userId.toString()
         )
-    }
+    }*/
 
-    companion object {
+/*    companion object {
         private const val FILE_PICK_REQUEST = 1
         private const val STORAGE_PERMISSION_REQUEST = 2
-    }
+    }*/
 }

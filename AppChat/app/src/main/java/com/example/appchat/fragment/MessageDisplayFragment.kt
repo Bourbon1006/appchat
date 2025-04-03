@@ -1,6 +1,9 @@
 package com.example.appchat.fragment
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
@@ -8,10 +11,12 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import com.example.appchat.R
 import com.example.appchat.activity.ChatActivity
 import com.example.appchat.adapter.MessageSessionAdapter
 import com.example.appchat.api.ApiClient
@@ -21,6 +26,7 @@ import com.example.appchat.model.MessageSession
 import com.example.appchat.util.UserPreferences
 import com.example.appchat.websocket.WebSocketManager
 import kotlinx.coroutines.launch
+import java.time.LocalDateTime
 
 class MessageDisplayFragment : Fragment() {
     private var _binding: FragmentMessageDisplayBinding? = null
@@ -46,6 +52,15 @@ class MessageDisplayFragment : Fragment() {
         sessionToRemove?.let {
             sessions.remove(it)
             adapter.updateSessions(sessions)
+        }
+    }
+
+    private val sessionUpdateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == "com.example.appchat.UPDATE_CHAT_SESSIONS") {
+                // 重新加载会话列表
+                loadSessions()
+            }
         }
     }
 
@@ -127,6 +142,13 @@ class MessageDisplayFragment : Fragment() {
         // 注册会话更新监听器
         WebSocketManager.addSessionUpdateListener(sessionUpdateListener)
         WebSocketManager.addFriendDeletedListener(friendDeletedListener)
+
+        // 注册广播接收器
+        LocalBroadcastManager.getInstance(requireContext())
+            .registerReceiver(
+                sessionUpdateReceiver,
+                IntentFilter("com.example.appchat.UPDATE_CHAT_SESSIONS")
+            )
     }
 
     private fun loadSessions() {
@@ -162,6 +184,13 @@ class MessageDisplayFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        // 注销广播接收器
+        try {
+            LocalBroadcastManager.getInstance(requireContext())
+                .unregisterReceiver(sessionUpdateReceiver)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
         _binding = null
         // 清除引用，避免内存泄漏
         WebSocketManager.setMessageDisplayFragment(null)
@@ -173,31 +202,45 @@ class MessageDisplayFragment : Fragment() {
     private fun updateSessionWithNewMessage(message: ChatMessage) {
         if (!isAdded) return  // 如果Fragment已经分离，则直接返回
         
-        // 判断消息类型（私聊/群聊）
-        val sessionId: Long = when {
-            message.groupId != null -> message.groupId
-            message.senderId == UserPreferences.getUserId(requireContext()) -> message.receiverId ?: 0L
-            else -> message.senderId ?: 0L
+        val currentUserId = UserPreferences.getUserId(requireContext())
+        
+        // 判断消息类型（私聊/群聊）和会话ID
+        val sessionId: Long = when (message.chatType) {
+            "GROUP" -> message.groupId ?: 0L
+            else -> if (message.senderId == currentUserId) message.receiverId ?: 0L else message.senderId
         }
         
         // 获取会话名称
-        val sessionName: String = when {
-            message.groupId != null -> (ApiClient.apiService.getGroupById(message.groupId) ?: "未知群组").toString()
-            message.senderId == UserPreferences.getUserId(requireContext()) -> message.receiverName ?: "未知用户"
-            else -> message.senderName ?: "未知用户"
+        val sessionName: String = when (message.chatType) {
+            "GROUP" -> message.groupName ?: "未知群组"
+            else -> if (message.senderId == currentUserId) 
+                message.receiverName ?: "未知用户" 
+            else
+                message.senderName
         }
         
         // 查找现有会话
-        val existingSession = sessions.find { it.partnerId == sessionId }
+        val existingSession = sessions.find { 
+            when (message.chatType) {
+                "GROUP" -> it.type == "GROUP" && it.partnerId == sessionId
+                else -> it.type == "PRIVATE" && it.partnerId == sessionId
+            }
+        }
         
         if (existingSession != null) {
             // 更新现有会话
             val updatedSession = message.timestamp?.let {
                 existingSession.copy(
                     lastMessage = message.content,
-                    lastMessageTime = it,
-                    unreadCount = existingSession.unreadCount +
-                        if (message.senderId != UserPreferences.getUserId(requireContext())) 1 else 0
+                    lastMessageTime = it.toString(),
+                    unreadCount = existingSession.unreadCount + when {
+                        // 如果是自己发送的消息，不增加未读数
+                        message.senderId == currentUserId -> 0
+                        // 如果当前正在查看这个会话，不增加未读数
+                        isCurrentlyViewing(sessionId, message.chatType) -> 0
+                        // 其他情况增加未读数
+                        else -> 1
+                    }
                 )
             }
             
@@ -209,14 +252,14 @@ class MessageDisplayFragment : Fragment() {
             // 创建新会话
             message.timestamp?.let { timestamp ->
                 val newSession = MessageSession(
-                    id = 0, // 临时ID，服务器会分配真实ID
+                    id = sessionId,
                     partnerId = sessionId,
                     partnerName = sessionName,
+                    partnerAvatar = null,
                     lastMessage = message.content,
-                    lastMessageTime = timestamp,
-                    unreadCount = 1,
-                    type = if (message.groupId != null) "GROUP" else "PRIVATE",
-                    partnerAvatar = null // 可以后续更新头像
+                    lastMessageTime = timestamp.toString(),
+                    unreadCount = if (message.senderId == currentUserId) 0 else 1,
+                    type = message.chatType
                 )
                 // 将新会话添加到列表开头
                 sessions.add(0, newSession)
@@ -225,5 +268,21 @@ class MessageDisplayFragment : Fragment() {
         
         // 通知适配器更新
         adapter.updateSessions(sessions)
+    }
+
+    // 判断是否正在查看该会话
+    private fun isCurrentlyViewing(sessionId: Long, chatType: String): Boolean {
+        val activity = requireActivity()
+        val currentFragment = activity.supportFragmentManager
+            .findFragmentById(R.id.fragmentContainer)
+        
+        // 检查当前Activity是否是ChatActivity
+        if (activity is ChatActivity) {
+            return when (chatType) {
+                "GROUP" -> activity.getCurrentGroupId() == sessionId
+                else -> activity.getCurrentPartnerId() == sessionId
+            }
+        }
+        return false
     }
 }

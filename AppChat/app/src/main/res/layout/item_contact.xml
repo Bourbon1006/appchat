@@ -3,15 +3,14 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:padding="12dp"
-    android:background="?android:attr/selectableItemBackground">
+    android:padding="8dp"
+    android:background="?attr/selectableItemBackground">
 
-    <com.google.android.material.imageview.ShapeableImageView
+    <ImageView
         android:id="@+id/contactAvatar"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:scaleType="centerCrop"
-        app:shapeAppearanceOverlay="@style/CircleImageView"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:src="@drawable/default_avatar"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"/>
@@ -23,35 +22,18 @@
         android:layout_marginStart="12dp"
         android:textSize="16sp"
         android:textColor="@color/text_primary"
-        android:maxLines="1"
-        android:ellipsize="end"
         app:layout_constraintStart_toEndOf="@id/contactAvatar"
-        app:layout_constraintEnd_toStartOf="@id/onlineIndicator"
+        app:layout_constraintEnd_toStartOf="@id/onlineStatus"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/statusMessage"/>
-
-    <TextView
-        android:id="@+id/statusMessage"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="12dp"
-        android:textSize="14sp"
-        android:textColor="@color/text_secondary"
-        android:maxLines="1"
-        android:ellipsize="end"
-        app:layout_constraintStart_toEndOf="@id/contactAvatar"
-        app:layout_constraintEnd_toStartOf="@id/onlineIndicator"
-        app:layout_constraintTop_toBottomOf="@id/contactName"
         app:layout_constraintBottom_toBottomOf="parent"/>
 
-    <View
-        android:id="@+id/onlineIndicator"
-        android:layout_width="8dp"
-        android:layout_height="8dp"
-        android:background="@drawable/online_indicator"
+    <ImageView
+        android:id="@+id/onlineStatus"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:layout_marginEnd="8dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent"
-        android:layout_marginEnd="4dp"/>
+        app:layout_constraintBottom_toBottomOf="parent"/>
 
 </androidx.constraintlayout.widget.ConstraintLayout> 

@@ -111,7 +111,7 @@ class MeFragment : Fragment() {
 
     private fun loadUserInfo() {
         ApiClient.apiService.getUser(userId).enqueue(object : retrofit2.Callback<UserDTO> {
-            override fun onResponse(call: retrofit2.Call<UserDTO>, response: retrofit2.Response<UserDTO>) {
+            override fun onResponse(call: retrofit2.Call<UserDTO>, response: Response<UserDTO>) {
                 if (response.isSuccessful) {
                     response.body()?.let { user ->
                         // 添加日志

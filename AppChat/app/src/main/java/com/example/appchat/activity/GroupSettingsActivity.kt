@@ -352,11 +352,6 @@ class GroupSettingsActivity : AppCompatActivity() {
         }
     }
 
-    override fun onBackPressed() {
-        super.onBackPressed()
-        // 只需调用默认实现，它会关闭当前activity并返回到前一个activity（群聊）
-    }
-
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.group_settings_menu, menu)
         return true

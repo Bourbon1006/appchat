@@ -149,6 +149,7 @@ class ChatWebSocketHandler(
         try {
             val jsonNode = objectMapper.readTree(message.payload)
             val type = jsonNode.get("type").asText()
+            val messageType = jsonNode.get("messageType")?.asText() ?: "TEXT"
 
             when (type) {
                 "message" -> {
@@ -156,22 +157,20 @@ class ChatWebSocketHandler(
                     handleChatMessage(messageData, session)
                 }
                 "CHAT" -> {
-                    val messageType = MessageType.valueOf(
-                        jsonNode["messageType"]?.asText() ?: "TEXT"
-                    )
-                    val content = jsonNode["content"]?.asText() ?: ""
-                    val senderId = jsonNode["senderId"]?.asLong() ?: 0
-                    val senderName = jsonNode["senderName"]?.asText()
-                    val receiverId = jsonNode["receiverId"]?.asLong()
-                    val groupId = jsonNode["groupId"]?.asLong()
-                    val fileUrl = jsonNode["fileUrl"]?.asText()
-                    // 根据消息是否包含 groupId 来区分私聊和群聊
+                    val content = jsonNode.get("content").asText()
+                    val senderId = jsonNode.get("senderId").asLong()
+                    val senderName = jsonNode.get("senderName").asText()
+                    val receiverId = jsonNode.get("receiverId")?.asLong()
+                    val groupId = jsonNode.get("groupId")?.asLong()
+                    val fileUrl = jsonNode.get("fileUrl")?.asText()
+                    val type = MessageType.valueOf(messageType)
+                    
                     if (groupId != null) {
                         handleGroupMessage(
                             content = content,
                             senderId = senderId,
                             groupId = groupId,
-                            type = messageType,
+                            type = type,
                             fileUrl = fileUrl,
                             session = session
                         )
@@ -180,7 +179,7 @@ class ChatWebSocketHandler(
                             content = content,
                             senderId = senderId,
                             receiverId = receiverId,
-                            type = messageType,
+                            type = type,
                             fileUrl = fileUrl,
                             session = session
                         )

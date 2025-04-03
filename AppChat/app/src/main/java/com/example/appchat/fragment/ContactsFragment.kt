@@ -79,7 +79,7 @@ class ContactsFragment : Fragment() {
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
-    ): View? {
+    ): View {
         binding = FragmentContactsBinding.inflate(inflater, container, false)
         
         viewPager = binding.viewPager
@@ -99,7 +99,7 @@ class ContactsFragment : Fragment() {
     }
     
     private fun setupRecyclerViews() {
-        contactsRecyclerView = binding.contactsRecyclerView ?: return
+        contactsRecyclerView = binding.contactsRecyclerView
         
         contactAdapter = ContactAdapter(
             onContactClick = { contact ->
@@ -317,15 +317,6 @@ class ContactsFragment : Fragment() {
         }
     }
 
-    override fun onDestroyView() {
-        super.onDestroyView()
-        // 不要在这里移除所有监听器，可能会影响MainActivity的监听
-        // WebSocketManager.removeAllListeners()
-        
-        // 只移除本Fragment添加的监听器
-        // WebSocketManager.removePendingRequestCountListener(pendingRequestCountListener)
-    }
-
     override fun onDestroy() {
         super.onDestroy()
         // 只有当Fragment真正销毁时才移除监听器
@@ -339,7 +330,7 @@ class ContactsFragment : Fragment() {
         WebSocketManager.addFriendRequestListener { request ->
             if (isAdded) {
                 activity?.runOnUiThread {
-                    println("📬 Received friend request: ${request.sender?.username}")
+                    println("📬 Received friend request: ${request.sender.username}")
                     // 刷新好友请求列表
                     loadFriendRequests()
                     // 更新角标
@@ -384,7 +375,7 @@ class ContactsFragment : Fragment() {
         WebSocketManager.addFriendRequestListener { request ->
             if (isAdded) {
                 activity?.runOnUiThread {
-                    println("📬 Received friend request: ${request.sender?.username}")
+                    println("📬 Received friend request: ${request.sender.username}")
                     // 刷新好友请求列表
                     loadFriendRequests()
                     // 更新角标

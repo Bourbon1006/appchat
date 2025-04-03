@@ -98,6 +98,10 @@
             android:label="选择联系人"
             android:exported="false" />
 
+        <activity
+            android:name=".activity.FilePreviewActivity"
+            android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"

@@ -58,6 +58,8 @@ dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     implementation("com.github.bumptech.glide:glide:4.16.0")
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
+    implementation("com.google.firebase:firebase-vertexai:16.3.0")
     annotationProcessor("com.github.bumptech.glide:compiler:4.12.0")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
@@ -86,4 +88,8 @@ dependencies {
 
     val kotlinVersion: String by rootProject.extra
     implementation("org.jetbrains.kotlin:kotlin-parcelize-runtime:$kotlinVersion")
+
+    /*// PDF 查看器库
+    implementation("com.github.barteksc:android-pdf-viewer:3.2.0-beta.1")
+*/
 }

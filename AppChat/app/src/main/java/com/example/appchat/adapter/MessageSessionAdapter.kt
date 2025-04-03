@@ -23,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import androidx.lifecycle.LifecycleOwner
 import com.bumptech.glide.load.engine.DiskCacheStrategy
+import android.util.Log
 
 class MessageSessionAdapter(
     private val onItemClick: (MessageSession) -> Unit,
@@ -59,7 +60,7 @@ class MessageSessionAdapter(
         )
         
         // 根据会话类型构建头像URL
-        val avatarUrl = when (session.type.uppercase()) {
+        val avatarUrl = when (session.type?.uppercase()) {
             "GROUP" -> "$baseUrl/api/groups/${session.partnerId}/avatar"
             else -> "$baseUrl/api/users/${session.partnerId}/avatar"
         }
@@ -71,13 +72,13 @@ class MessageSessionAdapter(
             .diskCacheStrategy(DiskCacheStrategy.NONE)
             .circleCrop()
             .placeholder(
-                if (session.type.uppercase() == "GROUP") 
+                if (session.type?.uppercase() == "GROUP") 
                     R.drawable.default_group_avatar 
                 else 
                     R.drawable.default_avatar
             )
             .error(
-                if (session.type.uppercase() == "GROUP") 
+                if (session.type?.uppercase() == "GROUP") 
                     R.drawable.default_group_avatar 
                 else 
                     R.drawable.default_avatar
@@ -123,30 +124,46 @@ class MessageSessionAdapter(
         println("🔄 Updating sessions: ${newSessions.size} items")
         sessions.clear()
         // 按最后消息时间排序，最新的在前面
-        sessions.addAll(newSessions.sortedByDescending { it.lastMessageTime })
+        sessions.addAll(newSessions.sortedByDescending { 
+            try {
+                LocalDateTime.parse(it.lastMessageTime)
+            } catch (e: Exception) {
+                // 如果解析失败，使用当前时间作为默认值
+                LocalDateTime.now()
+            }
+        })
         println("📊 Sessions after update: ${sessions.size} items")
         notifyDataSetChanged()
     }
 
-    private fun formatTime(time: LocalDateTime): String {
-        val now = LocalDateTime.now()
-        return when {
-            time.toLocalDate() == now.toLocalDate() -> {
-                // 今天，显示时间
-                DateTimeFormatter.ofPattern("HH:mm").format(time)
+    private fun formatTime(timeString: String): String {
+        try {
+            // 将字符串解析为 LocalDateTime
+            val time = LocalDateTime.parse(timeString)
+            val now = LocalDateTime.now()
+            
+            return when {
+                time.toLocalDate() == now.toLocalDate() -> {
+                    // 今天，显示时间
+                    DateTimeFormatter.ofPattern("HH:mm").format(time)
+                }
+                time.toLocalDate() == now.toLocalDate().minusDays(1) -> {
+                    // 昨天
+                    "昨天"
+                }
+                time.year == now.year -> {
+                    // 今年，显示月日
+                    DateTimeFormatter.ofPattern("MM-dd").format(time)
+                }
+                else -> {
+                    // 其他年份，显示年月日
+                    DateTimeFormatter.ofPattern("yyyy-MM-dd").format(time)
+                }
             }
-            time.toLocalDate() == now.toLocalDate().minusDays(1) -> {
-                // 昨天
-                "昨天"
-            }
-            time.year == now.year -> {
-                // 今年，显示月日
-                DateTimeFormatter.ofPattern("MM-dd").format(time)
-            }
-            else -> {
-                // 其他年份，显示年月日
-                DateTimeFormatter.ofPattern("yyyy-MM-dd").format(time)
-            }
+        } catch (e: Exception) {
+            // 如果解析失败，直接返回原始字符串
+            Log.e("MessageSessionAdapter", "Error parsing time: $timeString", e)
+            return timeString
         }
     }
 
@@ -166,11 +183,11 @@ class MessageSessionAdapter(
         val userId = UserPreferences.getUserId(context)
         coroutineScope.launch {
             try {
-                println("📱 Marking session as read: userId=$userId, partnerId=${session.partnerId}, type=${session.type}")
+                println("📱 Marking session as read: userId=$userId, partnerId=${session.partnerId}, type=${session.type ?: "PRIVATE"}")
                 val response = ApiClient.apiService.markSessionAsRead(
                     userId = userId,
                     partnerId = session.partnerId,
-                    type = session.type.uppercase()
+                    type = session.type ?: "PRIVATE"
                 )
                 println("📱 markSessionAsRead API response: $response")
                 
@@ -202,7 +219,7 @@ class MessageSessionAdapter(
                         val response = ApiClient.apiService.deleteSession(
                             userId = userId,
                             partnerId = session.partnerId,
-                            type = session.type
+                            type = session.type ?: "PRIVATE"
                         )
                         if (response.isSuccessful) {
                             // 从列表中移除会话
@@ -222,5 +239,9 @@ class MessageSessionAdapter(
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    private fun isGroupSession(session: MessageSession): Boolean {
+        return session.type?.equals("GROUP") ?: false
     }
 } 

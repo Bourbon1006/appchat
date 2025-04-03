@@ -69,11 +69,11 @@ class RegisterActivity : AppCompatActivity() {
                 
                 if (response.isSuccessful) {
                     response.body()?.let { authResponse ->
-                        // 保存用户信息
+                        // 保存用户信息，注意 token 可能为空
                         UserPreferences.saveUserData(
                             this@RegisterActivity,
                             authResponse.userId,
-                            authResponse.token,
+                            authResponse.token,  // 这里的 token 可能为空
                             authResponse.username
                         )
                     }
