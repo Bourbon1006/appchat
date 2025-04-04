@@ -40,6 +40,7 @@ class GroupServiceImpl(
     private val fileService: FileService
 ) : GroupService {
 
+    @Transactional
     override fun getGroupById(groupId: Long): GroupDTO {
         val group = groupRepository.findById(groupId)
             .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "Group not found with id: $groupId") }
@@ -116,6 +117,7 @@ class GroupServiceImpl(
         return updatedGroup.toDTO()
     }
 
+    @Transactional
     override fun getGroupMembers(groupId: Long): List<UserDTO> {
         val group = groupRepository.findById(groupId)
             .orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "Group not found with id: $groupId") }
@@ -183,4 +185,4 @@ class GroupServiceImpl(
         group.avatarUrl = avatarUrl
         groupRepository.save(group)
     }
-} 
+}

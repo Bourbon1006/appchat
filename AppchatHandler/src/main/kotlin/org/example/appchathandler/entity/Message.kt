@@ -88,7 +88,9 @@ data class Message(
 
     @OneToMany(mappedBy = "message", cascade = [CascadeType.ALL], fetch = FetchType.LAZY)
     @JsonIgnore
-    val readStatuses: MutableSet<MessageReadStatus> = mutableSetOf()
+    val readStatuses: MutableSet<MessageReadStatus> = mutableSetOf(),
+
+    var groupName: String? = null
 ) {
     override fun toString(): String {
         return "Message(id=$id, content=$content, sender=${sender.id}, receiver=${receiver?.id}, group=${group?.id}, type=$type, timestamp=$timestamp)"

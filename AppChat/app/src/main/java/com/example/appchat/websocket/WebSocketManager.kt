@@ -19,9 +19,11 @@ import kotlinx.coroutines.launch
 import android.widget.Toast
 import android.content.Context
 import com.example.appchat.R
+import com.example.appchat.service.WebSocketService
 
 object WebSocketManager {
     private var webSocket: WebSocket? = null
+    private lateinit var applicationContext: Context
     private val messageListeners = mutableListOf<(ChatMessage) -> Unit>()
     private val rawMessageListeners = mutableListOf<(String) -> Unit>()
     private val userStatusListeners = CopyOnWriteArrayList<(List<UserDTO>) -> Unit>()
@@ -41,6 +43,10 @@ object WebSocketManager {
     private val friendDeletedListeners = CopyOnWriteArrayList<(Long) -> Unit>()
     private var isConnected = false
     private var onlineStatusListener: ((Long, Int) -> Unit)? = null
+    private var reconnectAttempts = 0
+    private val maxReconnectAttempts = 5
+    private val baseReconnectDelay = 5000L // 5 seconds
+    private var webSocketService: WebSocketService? = null
 
     data class WebSocketResponse(
         val type: String,
@@ -52,6 +58,7 @@ object WebSocketManager {
 
     fun init(context: Context, userId: String) {
         currentUserId = userId.toLong()
+        applicationContext = context.applicationContext
         println("🔐 Initializing WebSocket with userId: $userId")
         
         // 构建 WebSocket URL
@@ -70,11 +77,13 @@ object WebSocketManager {
         val client = OkHttpClient.Builder()
             .readTimeout(0, TimeUnit.MILLISECONDS)
             .pingInterval(30, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
             .build()
         
         webSocket = client.newWebSocket(Request.Builder().url(wsUrl).build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                println("🌟 WebSocket connection opened")
+                reconnectAttempts = 0 // 重置重连次数
+                isConnected = true
                 handleWebSocketConnect()
             }
 
@@ -85,13 +94,7 @@ object WebSocketManager {
             }
             
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                println("❌ WebSocket failure: ${t.message}")
-                t.printStackTrace()
-                
-                coroutineScope.launch(Dispatchers.IO) {
-                    delay(5000)
-                    init(context, userId)
-                }
+                handleWebSocketFailure(t)
             }
             
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -153,17 +156,21 @@ object WebSocketManager {
 
         // 检查消息类型是否匹配当前会话
         val isCurrentSession = if (message.groupId != null) {
-            // 群聊消息：只在群聊会话中显示
             message.groupId == currentChatPartnerId
         } else {
-            // 私聊消息：只在私聊会话中显示
             currentChatPartnerId != 0L && message.groupId == null &&
             ((message.senderId == currentUserId && message.receiverId == currentChatPartnerId) ||
             (message.senderId == currentChatPartnerId && message.receiverId == currentUserId))
         }
 
         if (!isCurrentSession) {
-            println("⚠️ Message does not belong to current session, skipping...")
+            println("⚠️ Message does not belong to current session, showing notification...")
+            // 显示通知
+            // 对于群聊消息，只要不是当前会话就显示通知
+            // 对于私聊消息，只有接收者才显示通知
+            if (message.groupId != null || message.receiverId == currentUserId) {
+                webSocketService?.showMessageNotification(message)
+            }
             return
         }
 
@@ -547,5 +554,36 @@ object WebSocketManager {
         rawMessageListeners.clear()
         userStatusListeners.clear()
         errorListeners.clear()
+    }
+
+    private fun handleWebSocketFailure(t: Throwable) {
+        println("❌ WebSocket failure: ${t.message}")
+        isConnected = false
+        
+        if (reconnectAttempts < maxReconnectAttempts) {
+            val delay = calculateReconnectDelay()
+            coroutineScope.launch(Dispatchers.IO) {
+                delay(delay)
+                reconnectAttempts++
+                println("🔄 Attempting reconnection #$reconnectAttempts")
+                if (::applicationContext.isInitialized) {
+                    init(applicationContext, currentUserId.toString())
+                } else {
+                    println("❌ ApplicationContext not initialized")
+                }
+            }
+        } else {
+            println("❌ Max reconnection attempts reached")
+            // 可以通知用户连接已断开
+        }
+    }
+    
+    private fun calculateReconnectDelay(): Long {
+        // 指数退避策略
+        return baseReconnectDelay * (1 shl reconnectAttempts)
+    }
+
+    fun setWebSocketService(service: WebSocketService) {
+        webSocketService = service
     }
 }

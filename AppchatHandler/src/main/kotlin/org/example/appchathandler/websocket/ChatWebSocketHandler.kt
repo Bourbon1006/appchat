@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory
 import org.example.appchathandler.event.UserStatusUpdateEvent
 import org.example.appchathandler.event.FriendRequestNotificationEvent
 import org.example.appchathandler.dto.GroupCreateRequest
+import org.example.appchathandler.repository.GroupRepository
 
 @Component
 class ChatWebSocketHandler(
@@ -35,7 +36,8 @@ class ChatWebSocketHandler(
     private val friendRequestService: FriendRequestService,
     private val objectMapper: ObjectMapper,
     private val groupService: GroupService,
-    private val friendService: FriendService
+    private val friendService: FriendService,
+    private val groupRepository: GroupRepository
 ) : TextWebSocketHandler() {
 
     data class UserStatusDTO(
@@ -244,6 +246,11 @@ class ChatWebSocketHandler(
         session: WebSocketSession
     ) {
         try {
+            // 使用 groupRepository 而不是 groupService
+            val group = groupRepository.findById(groupId).orElseThrow {
+                IllegalArgumentException("Group not found with id: $groupId")
+            }
+            
             val message = messageService.createMessage(
                 content = content,
                 senderId = senderId,
@@ -258,7 +265,9 @@ class ChatWebSocketHandler(
             for (memberId in memberIds) {
                 val userSession = sessions[memberId]
                 if (userSession != null && userSession.isOpen) {
-                    val dto = messageService.convertToMessageDTO(message)
+                    val dto = messageService.convertToMessageDTO(message).copy(
+                        groupName = group.name  // 使用群组名称
+                    )
                     userSession.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
                         "type" to "message",
                         "message" to dto
@@ -267,7 +276,9 @@ class ChatWebSocketHandler(
             }
             
             // 发送响应给发送者
-            val responseDto = messageService.convertToMessageDTO(message)
+            val responseDto = messageService.convertToMessageDTO(message).copy(
+                groupName = group.name
+            )
             session.sendMessage(TextMessage(objectMapper.writeValueAsString(mapOf(
                 "type" to "messageSent",
                 "message" to responseDto
@@ -661,16 +672,11 @@ class ChatWebSocketHandler(
 
     private fun getUsersInGroup(groupId: Long): Set<Long> {
         try {
-            val group = groupService.getGroupById(groupId)
-            
-            // 我们需要从GroupDTO中获取成员ID
-            // 这里可能需要调整，取决于您的GroupDTO是否包含成员列表
-            // 如果没有，您可能需要在GroupService中添加一个方法来获取群组成员
-            
-            // 临时解决方案：从groupService中查询
+            // 直接使用groupService.getGroupMembers方法获取群组成员
+            // 避免先获取GroupDTO再获取成员的方式，防止懒加载异常
             return groupService.getGroupMembers(groupId).map { it.id }.toSet()
         } catch (e: Exception) {
-            logger.error("Error getting users in group: ${e.message}")
+            logger.error("Error getting users in group: ${e.message}", e)
             return emptySet()
         }
     }

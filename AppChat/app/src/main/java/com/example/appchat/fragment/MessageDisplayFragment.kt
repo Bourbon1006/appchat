@@ -205,13 +205,16 @@ class MessageDisplayFragment : Fragment() {
         val currentUserId = UserPreferences.getUserId(requireContext())
         
         // 判断消息类型（私聊/群聊）和会话ID
-        val sessionId: Long = when (message.chatType) {
-            "GROUP" -> message.groupId ?: 0L
+        val sessionId: Long = when {
+            message.groupId != null -> message.groupId
             else -> if (message.senderId == currentUserId) message.receiverId ?: 0L else message.senderId
         }
         
+        // 确定聊天类型
+        val chatType = if (message.groupId != null) "GROUP" else "PRIVATE"
+        
         // 获取会话名称
-        val sessionName: String = when (message.chatType) {
+        val sessionName: String = when (chatType) {
             "GROUP" -> message.groupName ?: "未知群组"
             else -> if (message.senderId == currentUserId) 
                 message.receiverName ?: "未知用户" 
@@ -221,7 +224,7 @@ class MessageDisplayFragment : Fragment() {
         
         // 查找现有会话
         val existingSession = sessions.find { 
-            when (message.chatType) {
+            when (chatType) {
                 "GROUP" -> it.type == "GROUP" && it.partnerId == sessionId
                 else -> it.type == "PRIVATE" && it.partnerId == sessionId
             }
@@ -237,7 +240,7 @@ class MessageDisplayFragment : Fragment() {
                         // 如果是自己发送的消息，不增加未读数
                         message.senderId == currentUserId -> 0
                         // 如果当前正在查看这个会话，不增加未读数
-                        isCurrentlyViewing(sessionId, message.chatType) -> 0
+                        isCurrentlyViewing(sessionId, chatType) -> 0
                         // 其他情况增加未读数
                         else -> 1
                     }
@@ -259,7 +262,7 @@ class MessageDisplayFragment : Fragment() {
                     lastMessage = message.content,
                     lastMessageTime = timestamp.toString(),
                     unreadCount = if (message.senderId == currentUserId) 0 else 1,
-                    type = message.chatType
+                    type = chatType
                 )
                 // 将新会话添加到列表开头
                 sessions.add(0, newSession)

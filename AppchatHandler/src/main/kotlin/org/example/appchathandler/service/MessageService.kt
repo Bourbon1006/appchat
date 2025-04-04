@@ -17,13 +17,17 @@ import org.example.appchathandler.repository.GroupRepository
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.context.ApplicationEventPublisher
 import org.example.appchathandler.event.SessionsUpdateEvent
+import org.example.appchathandler.service.UserService
+import org.example.appchathandler.service.GroupService
 
 @Service
 class MessageService(
     private val messageRepository: MessageRepository,
     private val userRepository: UserRepository,
     private val groupRepository: GroupRepository,
-    private val messageReadStatusRepository: MessageReadStatusRepository
+    private val messageReadStatusRepository: MessageReadStatusRepository,
+    private val userService: UserService,
+    private val groupService: GroupService
 ) {
     @Autowired
     private lateinit var applicationEventPublisher: ApplicationEventPublisher
@@ -36,26 +40,19 @@ class MessageService(
         type: MessageType = MessageType.TEXT,
         fileUrl: String? = null
     ): Message {
-        val sender = userRepository.findById(senderId).orElseThrow {
-            IllegalArgumentException("User with id $senderId not found")
-        }
-        val receiver = receiverId?.let { userRepository.findById(it).orElse(null) }
+        val sender = userService.getUser(senderId) ?: throw RuntimeException("Sender not found")
+        val receiver = receiverId?.let { userService.getUser(it) }
         val group = groupId?.let { groupRepository.findById(it).orElse(null) }
-
-        if (receiver == null && group == null) {
-            throw IllegalArgumentException("必须指定接收者或群组")
-        }
-
-        val message = Message(
+        
+        return messageRepository.save(Message(
             content = content,
             sender = sender,
             receiver = receiver,
             group = group,
             type = type,
-            fileUrl = fileUrl
-        )
-
-        return messageRepository.save(message)
+            fileUrl = fileUrl,
+            groupName = group?.name
+        ))
     }
 
     fun getGroupMessages(groupId: Long, userId: Long): List<MessageDTO> {
@@ -526,20 +523,28 @@ class MessageService(
     }
 
     fun convertToMessageDTO(message: Message): MessageDTO {
-        val sender = userRepository.findById(message.sender.id).orElse(null)
-        
+        val sender = message.sender
+        val receiver = message.receiver
+        val group = message.group
+
+        // 如果是群消息，获取群组名称
+        val groupName = if (group != null) {
+            group.name
+        } else null
+
         return MessageDTO(
             id = message.id,
             content = message.content,
-            senderId = message.sender.id,
-            senderName = sender?.username ?: "Unknown",
-            senderNickname = sender?.nickname,
-            receiverId = message.receiver?.id,
-            receiverName = if (message.receiver?.id != null) userRepository.findById(message.receiver!!.id).orElse(null)?.username else null,
-            groupId = message.group?.id,
+            timestamp = message.timestamp,
+            senderId = sender.id,
+            senderName = sender.username,
+            senderNickname = sender.nickname,
+            receiverId = receiver?.id,
+            receiverName = receiver?.username,
+            groupId = group?.id,
+            groupName = groupName,
             type = message.type,
-            fileUrl = message.fileUrl,
-            timestamp = message.timestamp
+            fileUrl = message.fileUrl
         )
     }
 }

@@ -34,6 +34,7 @@ import android.view.View
 import com.example.appchat.R
 import com.example.appchat.adapter.ContactSelectionAdapter
 import com.example.appchat.adapter.SearchResultAdapter
+import com.example.appchat.api.RetrofitClient
 import com.example.appchat.databinding.ActivityMainBinding
 import com.example.appchat.fragment.MomentsFragment
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +44,8 @@ import com.example.appchat.model.CreateGroupRequest
 import com.example.appchat.model.Group
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.coroutineScope
+import org.greenrobot.eventbus.Subscribe
+import org.greenrobot.eventbus.ThreadMode
 
 class MainActivity : AppCompatActivity() {
     // 将 binding 改为 internal，这样同包的类可以访问
@@ -129,7 +132,7 @@ class MainActivity : AppCompatActivity() {
             .commit()
     }
 
-/*    private fun setupToolbar() {
+    /*private fun setupToolbar() {
         toolbar = findViewById(R.id.toolbar)
         setSupportActionBar(toolbar)
         supportActionBar?.apply {
@@ -272,7 +275,7 @@ class MainActivity : AppCompatActivity() {
         _binding = null
     }
 
-    /*@Subscribe(threadMode = ThreadMode.MAIN)
+    @Subscribe(threadMode = ThreadMode.MAIN)
     fun onSessionUpdate(@Suppress("UNUSED_PARAMETER") event: ChatActivity.SessionUpdateEvent) {
         // 收到会话更新事件，刷新会话列表
         loadMessageSessions()
@@ -298,7 +301,7 @@ class MainActivity : AppCompatActivity() {
                 Log.e("MainActivity", "Error loading sessions", e)
             }
         }
-    }*/
+    }
 
     // 添加菜单相关的对话框方法
     private fun showSearchMessagesDialog() {
@@ -696,12 +699,12 @@ class MainActivity : AppCompatActivity() {
         updatePendingRequestCount()
     }
 
-    /*private fun setupWebSocket() {
+    private fun setupWebSocket() {
         WebSocketManager.init(
             context = this,
             userId = currentUserId.toString()
         )
-    }*/
+    }
 
     // 添加公共方法供 Fragment 调用
     fun refreshPendingRequests() {
@@ -709,23 +712,23 @@ class MainActivity : AppCompatActivity() {
         updatePendingRequestCount()
     }
 
-    /*// 修复其他调用 WebSocketManager.init 的地方
+    // 修复其他调用 WebSocketManager.init 的地方
     private fun reconnectWebSocket() {
         WebSocketManager.init(
             context = this,
             userId = currentUserId.toString()
         )
-    }*/
+    }
 
-    /*private fun handleWebSocketReconnect(serverUrl: String, userId: Long) {
+    private fun handleWebSocketReconnect(serverUrl: String, userId: Long) {
         WebSocketManager.init(
             context = this,
             userId = userId.toString()
         )
-    }*/
+    }
 
-/*    companion object {
+    companion object {
         private const val FILE_PICK_REQUEST = 1
         private const val STORAGE_PERMISSION_REQUEST = 2
-    }*/
+    }
 }
