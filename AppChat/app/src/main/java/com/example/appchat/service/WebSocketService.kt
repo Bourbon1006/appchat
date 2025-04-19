@@ -115,6 +115,7 @@ class WebSocketService : Service() {
                 MessageType.VIDEO -> "[视频]"
                 MessageType.FILE -> "[文件]"
                 MessageType.TIME -> message.content
+                MessageType.AUDIO -> "[语音]"
             })
             .setSmallIcon(R.drawable.ic_notification)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

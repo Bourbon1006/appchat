@@ -60,26 +60,80 @@
                         android:visibility="gone"
                         android:background="@drawable/bg_message_sent">
 
-
-                    <ImageView
-                            android:id="@+id/fileIcon"
+                    <LinearLayout
+                            android:id="@+id/voiceContainer"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:adjustViewBounds="true"
-                            android:maxWidth="240dp"
-                            android:maxHeight="240dp"
-                            android:minWidth="120dp"
-                            android:minHeight="120dp"
-                            android:scaleType="fitCenter"
-                            android:padding="4dp" />
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:padding="8dp"
+                            android:background="@drawable/bg_message_sent">
 
-                    <ImageView
-                            android:id="@+id/playIcon"
-                            android:layout_width="48dp"
-                            android:layout_height="48dp"
-                            android:layout_gravity="center"
-                            android:src="@drawable/ic_play"
-                            android:visibility="gone" />
+                        <ImageView
+                                android:id="@+id/fileIcon"
+                                android:layout_width="24dp"
+                                android:layout_height="24dp"
+                                android:src="@drawable/ic_voice"
+                                android:visibility="gone"/>
+
+                        <LinearLayout
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:layout_marginStart="8dp">
+
+                            <TextView
+                                    android:id="@+id/fileName"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:textColor="@color/white"
+                                    android:textSize="14sp"/>
+
+                            <TextView
+                                    android:id="@+id/fileSize"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:textColor="@color/white"
+                                    android:textSize="12sp"
+                                    android:layout_marginTop="2dp"
+                                    android:visibility="gone"/>
+
+                            <LinearLayout
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="horizontal"
+                                    android:gravity="center_vertical"
+                                    android:layout_marginTop="4dp">
+
+                                <ImageButton
+                                        android:id="@+id/playButton"
+                                        android:layout_width="24dp"
+                                        android:layout_height="24dp"
+                                        android:background="?attr/selectableItemBackgroundBorderless"
+                                        android:src="@drawable/ic_play"
+                                        android:visibility="gone"/>
+
+                                <ProgressBar
+                                        android:id="@+id/voiceProgress"
+                                        style="?android:attr/progressBarStyleHorizontal"
+                                        android:layout_width="120dp"
+                                        android:layout_height="2dp"
+                                        android:layout_marginStart="8dp"
+                                        android:progressTint="@color/white"
+                                        android:progressBackgroundTint="#80FFFFFF"
+                                        android:visibility="gone"/>
+
+                                <TextView
+                                        android:id="@+id/durationText"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="8dp"
+                                        android:textColor="@color/white"
+                                        android:textSize="12sp"
+                                        android:visibility="gone"/>
+                            </LinearLayout>
+                        </LinearLayout>
+                    </LinearLayout>
                 </FrameLayout>
             </FrameLayout>
         </LinearLayout>

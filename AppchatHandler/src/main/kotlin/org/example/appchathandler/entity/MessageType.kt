@@ -6,5 +6,6 @@ enum class MessageType {
     IMAGE,
     VIDEO,
     PRIVATE,
-    GROUP
+    GROUP,
+    AUDIO
 }

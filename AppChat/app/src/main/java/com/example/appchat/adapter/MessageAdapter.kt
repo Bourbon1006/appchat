@@ -12,10 +12,6 @@ import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.CheckBox
-import android.widget.ImageView
-import android.widget.TextView
-import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
@@ -50,7 +46,12 @@ import androidx.core.content.FileProvider
 import java.net.HttpURLConnection
 import java.net.URL
 import android.graphics.Color
+import android.widget.*
 import androidx.core.content.ContextCompat
+import com.example.appchat.util.AudioPlayerUtil
+import android.media.MediaPlayer
+import java.util.concurrent.Executors
+import com.example.appchat.util.EncryptionUtil
 
 class MessageAdapter(
     private val context: Context,
@@ -71,6 +72,8 @@ class MessageAdapter(
     private var onItemClickListener: ((Int) -> Unit)? = null
     private var highlightedMessageId: Long = -1L
     private val handler = Handler(Looper.getMainLooper())
+    private val durationCache = mutableMapOf<String, Int>()
+    private val executor = Executors.newSingleThreadExecutor()
 
     fun setOnItemLongClickListener(listener: (Int) -> Boolean) {
         onItemLongClickListener = listener
@@ -320,17 +323,16 @@ class MessageAdapter(
         private val onMessageDelete: (Long) -> Unit
     ) : RecyclerView.ViewHolder(itemView) {
         private val messageText: TextView = itemView.findViewById(R.id.messageText)
-            ?: throw IllegalStateException("Required view 'messageText' not found")
         private val timeText: TextView = itemView.findViewById(R.id.timeText)
-            ?: throw IllegalStateException("Required view 'timeText' not found")
         private val fileContainer: View? = itemView.findViewById(R.id.fileContainer)
         private val fileIcon: ImageView? = itemView.findViewById(R.id.fileIcon)
         private val playIcon: ImageView? = itemView.findViewById(R.id.playIcon)
         private val avatarImage: ImageView = itemView.findViewById(R.id.avatar)
-            ?: throw IllegalStateException("Required view 'avatar' not found")
         val checkbox: CheckBox = itemView.findViewById(R.id.messageCheckbox)
-            ?: throw IllegalStateException("Required view 'messageCheckbox' not found")
         private val senderName: TextView = itemView.findViewById(R.id.senderName)
+        private val fileName: TextView? = itemView.findViewById(R.id.fileName)
+        private val fileProgressBar: ProgressBar? = itemView.findViewById(R.id.voiceProgress)
+        private val fileSize: TextView? = itemView.findViewById(R.id.fileSize)
 
         fun bind(message: ChatMessage, previousMessage: ChatMessage?) {
             // 加载发送者头像
@@ -370,6 +372,7 @@ class MessageAdapter(
                 MessageType.FILE -> handleFileMessage(message)
                 MessageType.IMAGE -> handleImageMessage(message)
                 MessageType.VIDEO -> handleVideoMessage(message)
+                MessageType.AUDIO -> handleVoiceMessage(message)
             }
 
             // 在群聊中显示发送者名称（除了自己发的消息）
@@ -394,7 +397,16 @@ class MessageAdapter(
 
         private fun handleTextMessage(message: ChatMessage) {
             messageText.visibility = View.VISIBLE
-            messageText.text = message.content
+            
+            // 检查消息是否加密，如果是则解密
+            val content = if (EncryptionUtil.isEncrypted(message.content)) {
+                val encryptedContent = EncryptionUtil.removeEncryptionMark(message.content)
+                EncryptionUtil.decrypt(encryptedContent)
+            } else {
+                message.content
+            }
+            
+            messageText.text = content
             fileContainer?.visibility = View.GONE
         }
 
@@ -403,153 +415,79 @@ class MessageAdapter(
             val fileName = message.content
             val extension = fileName.substringAfterLast(".", "").lowercase()
             
-            // 确保文件容器可见
+            // 设置文件容器和图标可见
             fileContainer?.visibility = View.VISIBLE
             fileIcon?.visibility = View.VISIBLE
+/*            fileName?.visibility = View.VISIBLE*/
+            fileProgressBar?.visibility = View.GONE
             
-            // 根据文件类型设置不同的图标和处理方式
+            // 设置文件名
+            this.fileName?.text = fileName
+            
+            // 根据文件类型设置不同的图标和背景
             when {
                 isImageFile(extension) -> {
-                    // 显示图片缩略图
-                    messageText.visibility = View.GONE
-                    fileContainer?.visibility = View.VISIBLE
-                    fileIcon?.visibility = View.VISIBLE
-                    playIcon?.visibility = View.GONE
-                    
-                    // 加载图片缩略图 - 确保使用完整URL
-                    fileUrl?.let { url ->
-                        // 检查URL是否包含完整路径，如果不是，添加基础URL
-                        val fullUrl = if (url.startsWith("http")) {
-                            url
-                        } else {
-                            val baseUrl = getBaseUrl(itemView.context)
-                            if (url.startsWith("/")) baseUrl + url else "$baseUrl/$url"
-                        }
-                        
-                        // 设置图片容器的最大宽度为屏幕宽度的70%
-                        val displayMetrics = itemView.context.resources.displayMetrics
-                        val maxWidth = (displayMetrics.widthPixels * 0.7).toInt()
-                        
-                        // 使用FitCenter而不是CenterCrop，保持图片比例
-                        Glide.with(itemView.context)
-                            .load(fullUrl)
-                            .apply(RequestOptions()
-                                .override(maxWidth, Target.SIZE_ORIGINAL) // 设置最大宽度，高度自适应
-                                .fitCenter() // 保持图片比例
-                                .diskCacheStrategy(DiskCacheStrategy.ALL)
-                                .placeholder(R.drawable.ic_image_loading)
-                                .error(R.drawable.ic_image_error))
-                            .into(fileIcon!!)
-                        
-                        // 设置图片容器的宽高为自适应
-                        fileIcon.layoutParams?.width = ViewGroup.LayoutParams.WRAP_CONTENT
-                        fileIcon.layoutParams?.height = ViewGroup.LayoutParams.WRAP_CONTENT
-                        fileIcon.adjustViewBounds = true // 允许视图根据图片比例调整大小
-                        fileIcon.maxWidth = maxWidth // 设置最大宽度
-                        fileIcon.maxHeight = maxWidth // 设置最大高度，防止图片过高
-                    }
-                    
-                    // 点击查看大图
-                    fileContainer?.setOnClickListener {
-                        showImagePreview(fileUrl)
-                    }
+                    fileIcon?.setImageResource(R.drawable.ic_image)
+                    fileContainer?.setBackgroundResource(R.drawable.bg_file_message_image)
+                    // 加载图片缩略图
+                    Glide.with(itemView.context)
+                        .load(fileUrl)
+                        .apply(RequestOptions()
+                            .placeholder(R.drawable.ic_image)
+                            .error(R.drawable.ic_image)
+                            .diskCacheStrategy(DiskCacheStrategy.ALL)
+                            .centerCrop())
+                        .into(fileIcon!!)
                 }
                 isVideoFile(extension) -> {
-                    // 显示视频缩略图
-                    messageText.visibility = View.GONE
-                    fileContainer?.visibility = View.VISIBLE
-                    fileIcon?.visibility = View.VISIBLE
-                    playIcon?.visibility = View.VISIBLE
-                    
-                    // 设置视频容器的最大宽度为屏幕宽度的70%
-                    val displayMetrics = itemView.context.resources.displayMetrics
-                    val maxWidth = (displayMetrics.widthPixels * 0.7).toInt()
-                    
-                    // 加载视频缩略图 - 确保使用完整URL
-                    fileUrl?.let { url ->
-                        // 检查URL是否包含完整路径，如果不是，添加基础URL
-                        val fullUrl = if (url.startsWith("http")) {
-                            url
-                        } else {
-                            val baseUrl = getBaseUrl(itemView.context)
-                            if (url.startsWith("/")) baseUrl + url else "$baseUrl/$url"
-                        }
-                        
-                        Glide.with(itemView.context)
-                            .load(fullUrl)
-                            .apply(RequestOptions()
-                                .frame(1000000) // 获取视频第一帧作为缩略图
-                                .override(maxWidth, Target.SIZE_ORIGINAL) // 设置最大宽度，高度自适应
-                                .fitCenter() // 保持视频比例
-                                .diskCacheStrategy(DiskCacheStrategy.ALL)
-                                .placeholder(R.drawable.video_placeholder)
-                                .error(R.drawable.video_placeholder))
-                            .into(fileIcon!!)
-                        
-                        // 设置视频容器的宽高为自适应
-                        fileIcon.layoutParams?.width = ViewGroup.LayoutParams.WRAP_CONTENT
-                        fileIcon.layoutParams?.height = ViewGroup.LayoutParams.WRAP_CONTENT
-                        fileIcon.adjustViewBounds = true // 允许视图根据视频比例调整大小
-                        fileIcon.maxWidth = maxWidth // 设置最大宽度
-                        fileIcon.maxHeight = maxWidth // 设置最大高度，防止视频过高
-                    }
-                    
-                    // 点击播放视频
-                    fileContainer?.setOnClickListener {
-                        showVideoPreview(fileUrl)
-                    }
+                    fileIcon?.setImageResource(R.drawable.ic_video)
+                    fileContainer?.setBackgroundResource(R.drawable.bg_file_message_video)
                 }
                 isPdfFile(extension) -> {
-                    // PDF 文件特殊处理
-                    messageText.text = "📄 ${message.content}"
                     fileIcon?.setImageResource(R.drawable.ic_pdf)
-                    
-                    // 添加日志以便调试
-                    Log.d("MessageAdapter", "PDF file detected: $fileName, URL: $fileUrl")
-                    
-                    // 确保点击事件被正确设置
-                    itemView.setOnClickListener {
-                        Log.d("MessageAdapter", "PDF file clicked: $fileName")
-                        showFilePreview(fileUrl, fileName)
-                    }
-                    
-                    // 文件容器的点击事件
-                    fileContainer?.setOnClickListener {
-                        Log.d("MessageAdapter", "PDF file container clicked: $fileName")
-                        showFilePreview(fileUrl, fileName)
-                    }
+                    fileContainer?.setBackgroundResource(R.drawable.bg_file_message_pdf)
                 }
                 isWordFile(extension) -> {
-                    messageText.text = "📝 ${message.content}"
                     fileIcon?.setImageResource(R.drawable.ic_word)
-                    fileContainer?.setOnClickListener {
-                        showFilePreview(fileUrl, fileName)
-                    }
+                    fileContainer?.setBackgroundResource(R.drawable.bg_file_message_word)
                 }
                 isExcelFile(extension) -> {
-                    messageText.text = "📊 ${message.content}"
                     fileIcon?.setImageResource(R.drawable.ic_excel)
-                    fileContainer?.setOnClickListener {
-                        showFilePreview(fileUrl, fileName)
-                    }
+                    fileContainer?.setBackgroundResource(R.drawable.bg_file_message_excel)
                 }
                 isPptFile(extension) -> {
-                    messageText.text = "📊 ${message.content}"
                     fileIcon?.setImageResource(R.drawable.ic_ppt)
-                    fileContainer?.setOnClickListener {
-                        showFilePreview(fileUrl, fileName)
-                    }
+                    fileContainer?.setBackgroundResource(R.drawable.bg_file_message_ppt)
                 }
                 else -> {
-                    messageText.text = "📎 ${message.content}"
                     fileIcon?.setImageResource(R.drawable.ic_file)
-                    fileContainer?.setOnClickListener {
+                    fileContainer?.setBackgroundResource(R.drawable.bg_file_message_default)
+                }
+            }
+            
+            // 设置点击事件
+            fileContainer?.setOnClickListener {
+                when {
+                    isImageFile(extension) -> {
+                        // 打开图片预览
+                        val intent = Intent(itemView.context, ImagePreviewActivity::class.java)
+                        intent.putExtra("imageUrl", fileUrl)
+                        itemView.context.startActivity(intent)
+                    }
+                    isVideoFile(extension) -> {
+                        // 打开视频播放器
+                        val intent = Intent(itemView.context, VideoPreviewActivity::class.java)
+                        intent.putExtra("videoUrl", fileUrl)
+                        itemView.context.startActivity(intent)
+                    }
+                    else -> {
+                        // 下载并打开其他类型文件
                         showFilePreview(fileUrl, fileName)
                     }
                 }
             }
             
-            // 添加长按事件
+            // 设置长按事件
             fileContainer?.setOnLongClickListener {
                 showFileOptions(itemView.context, fileUrl, fileName, extension)
                 true
@@ -581,6 +519,163 @@ class MessageAdapter(
                 true
             }
         }
+
+        private fun handleVoiceMessage(message: ChatMessage) {
+            Log.d("MessageAdapter", "Handling voice message: ${message.fileUrl}")
+            
+            // 设置语音消息的布局
+            messageText.visibility = View.GONE
+            fileContainer?.visibility = View.VISIBLE
+            
+            // 获取语音容器
+            val voiceContainer = itemView.findViewById<LinearLayout>(R.id.voiceContainer)
+            voiceContainer?.visibility = View.VISIBLE
+            
+            // 设置语音图标
+            fileIcon?.apply {
+                visibility = View.VISIBLE
+                setImageResource(R.drawable.ic_voice)
+                setColorFilter(ContextCompat.getColor(itemView.context, R.color.colorPrimary))
+            }
+            
+            // 设置播放按钮
+            val playButton = itemView.findViewById<ImageButton>(R.id.playButton)
+            playButton?.visibility = View.VISIBLE
+            
+            // 设置进度条
+            val progressBar = itemView.findViewById<ProgressBar>(R.id.voiceProgress)
+            progressBar?.visibility = View.VISIBLE
+            
+            // 设置时长文本
+            val durationText = itemView.findViewById<TextView>(R.id.durationText)
+            durationText?.visibility = View.VISIBLE
+            
+            // 设置语音时长
+            val duration = getAudioDuration(message.fileUrl ?: "")
+            val minutes = duration / 60
+            val seconds = duration % 60
+            val durationStr = String.format("%02d:%02d", minutes, seconds)
+            Log.d("MessageAdapter", "Setting duration text: $durationStr")
+            durationText?.text = durationStr
+            
+            // 设置进度条（初始为0）
+            progressBar?.progress = 0
+            
+            // 创建音频播放器
+            val audioPlayer = AudioPlayerUtil(itemView.context)
+            
+            // 设置播放按钮点击事件
+            playButton?.setOnClickListener {
+                val fileUrl = message.fileUrl
+                if (fileUrl != null) {
+                    val fullUrl = if (fileUrl.startsWith("http")) {
+                        fileUrl
+                    } else {
+                        val baseUrl = getBaseUrl(itemView.context)
+                        if (fileUrl.startsWith("/")) baseUrl + fileUrl else "$baseUrl/$fileUrl"
+                    }
+                    
+                    Log.d("MessageAdapter", "Playing audio from URL: $fullUrl")
+                    
+                    // 设置进度监听
+                    audioPlayer.setOnProgressListener { progress ->
+                        progressBar?.progress = progress
+                    }
+                    
+                    // 设置错误监听
+                    audioPlayer.setOnErrorListener { error ->
+                        Log.e("MessageAdapter", "Audio playback error: $error")
+                        Toast.makeText(itemView.context, error, Toast.LENGTH_SHORT).show()
+                        playButton.setImageResource(R.drawable.ic_play)
+                    }
+                    
+                    // 设置完成监听
+                    audioPlayer.setOnCompletionListener {
+                        Log.d("MessageAdapter", "Audio playback completed")
+                        progressBar?.progress = 0
+                        playButton.setImageResource(R.drawable.ic_play)
+                    }
+                    
+                    // 根据当前播放状态切换按钮图标和播放/暂停
+                    if (audioPlayer.isPlaying()) {
+                        audioPlayer.pauseAudio()
+                        playButton.setImageResource(R.drawable.ic_play)
+                    } else {
+                        if (progressBar?.progress == 0) {
+                            // 如果是新开始播放
+                            audioPlayer.playAudioFromUrl(fullUrl)
+                        } else {
+                            // 如果是暂停后继续播放
+                            audioPlayer.resumeAudio()
+                        }
+                        playButton.setImageResource(R.drawable.ic_pause)
+                    }
+                }
+            }
+
+            // 设置长按事件
+            voiceContainer?.setOnLongClickListener {
+                showFileOptions(itemView.context, message.fileUrl, "语音消息", "m4a")
+                true
+            }
+        }
+
+        private fun getAudioDuration(fileUrl: String): Int {
+            if (fileUrl.isEmpty()) {
+                Log.d("MessageAdapter", "Empty file URL")
+                return 0
+            }
+
+            // 检查缓存
+            durationCache[fileUrl]?.let { 
+                Log.d("MessageAdapter", "Using cached duration: $it seconds")
+                return it 
+            }
+
+            // 构建完整URL
+            val fullUrl = if (fileUrl.startsWith("http")) {
+                fileUrl
+            } else {
+                val baseUrl = getBaseUrl(context)
+                if (fileUrl.startsWith("/")) baseUrl + fileUrl else "$baseUrl/$fileUrl"
+            }
+
+            Log.d("MessageAdapter", "Getting duration for URL: $fullUrl")
+
+            // 在后台线程中获取时长
+            executor.execute {
+                try {
+                    val mediaPlayer = MediaPlayer()
+                    mediaPlayer.setDataSource(fullUrl)
+                    mediaPlayer.setOnPreparedListener { mp ->
+                        val duration = mp.duration / 1000  // 转换为秒
+                        Log.d("MessageAdapter", "Audio duration: $duration seconds")
+                        
+                        // 缓存结果
+                        durationCache[fileUrl] = duration
+                        
+                        // 通知UI更新
+                        handler.post {
+                            notifyDataSetChanged()
+                        }
+                        
+                        // 释放资源
+                        mp.release()
+                    }
+                    mediaPlayer.setOnErrorListener { _, what, extra ->
+                        Log.e("MessageAdapter", "Error preparing media player: what=$what, extra=$extra")
+                        durationCache[fileUrl] = 0
+                        true
+                    }
+                    mediaPlayer.prepareAsync()
+                } catch (e: Exception) {
+                    Log.e("MessageAdapter", "Error getting audio duration: ${e.message}", e)
+                    durationCache[fileUrl] = 0
+                }
+            }
+            
+            return 0  // 初始返回0，等获取到实际时长后会通过notifyDataSetChanged更新UI
+        }
     }
 
     companion object {
@@ -588,13 +683,13 @@ class MessageAdapter(
         private const val VIEW_TYPE_OTHER_MESSAGE = 2
     }
 
-    // 文件类型判断的辅助方法保持在适配器类级别
+    // 文件类型判断的辅助方法
     private fun isImageFile(extension: String): Boolean {
-        return extension in listOf("jpg", "jpeg", "png", "gif", "webp")
+        return extension.lowercase() in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp")
     }
 
     private fun isVideoFile(extension: String): Boolean {
-        return extension in listOf("mp4", "3gp", "mkv", "webm")
+        return extension.lowercase() in listOf("mp4", "3gp", "mkv", "webm", "avi", "mov")
     }
 
     private fun isPdfFile(extension: String): Boolean {
@@ -602,15 +697,19 @@ class MessageAdapter(
     }
 
     private fun isWordFile(extension: String): Boolean {
-        return extension in listOf("doc", "docx", "txt")
+        return extension.lowercase() in listOf("doc", "docx", "txt", "rtf")
     }
 
     private fun isExcelFile(extension: String): Boolean {
-        return extension in listOf("xls", "xlsx")
+        return extension.lowercase() in listOf("xls", "xlsx", "csv")
     }
 
     private fun isPptFile(extension: String): Boolean {
-        return extension in listOf("ppt", "pptx")
+        return extension.lowercase() in listOf("ppt", "pptx")
+    }
+
+    private fun isAudioFile(extension: String): Boolean {
+        return extension.lowercase() in listOf("mp3", "wav", "m4a", "aac", "ogg")
     }
 
     private fun formatTime(timestamp: LocalDateTime): String {

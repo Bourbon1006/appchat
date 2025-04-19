@@ -9,6 +9,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
+import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import androidx.activity.result.ActivityResultLauncher
@@ -39,6 +40,16 @@ import com.bumptech.glide.Glide
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.example.appchat.R
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import com.example.appchat.util.AudioRecorderUtil
+import com.example.appchat.util.AudioPlayerUtil
+import android.Manifest
+import android.app.Activity
+import android.os.Build
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import java.io.File
+import java.util.UUID
+import com.example.appchat.util.EncryptionUtil
 
 class ChatActivity : AppCompatActivity() {
     private lateinit var binding: ActivityChatBinding
@@ -46,6 +57,7 @@ class ChatActivity : AppCompatActivity() {
     private lateinit var messageInput: EditText
     private lateinit var sendButton: ImageButton
     private lateinit var attachButton: ImageButton
+    private lateinit var voiceButton: ImageButton
     private lateinit var deleteButton: ImageButton
     private lateinit var adapter: MessageAdapter
     private var receiverId: Long = 0
@@ -59,6 +71,12 @@ class ChatActivity : AppCompatActivity() {
     private var partnerId: Long = 0
     private var currentUserId: Long = 0
     private lateinit var baseUrl: String  // 添加 baseUrl 变量
+    
+    // 音频相关
+    private lateinit var audioPlayer: AudioPlayerUtil
+    private var audioRecorder: AudioRecorderUtil? = null
+    private var isRecording = false
+    private var currentAudioFile: File? = null
 
     // ActivityResultLauncher for file picking
     private val filePickerLauncher: ActivityResultLauncher<String> = registerForActivityResult(
@@ -77,6 +95,46 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
+    private lateinit var messageAdapter: MessageAdapter
+    private lateinit var searchResultAdapter: SearchResultAdapter
+    private var currentChatPartnerId: Long = 0
+    private var currentChatPartnerName: String = ""
+    private var currentChatPartnerAvatar: String? = null
+    private var currentUserNickname: String = ""
+    private var currentUserAvatar: String? = null
+    private var isSearchMode = false
+    private var searchQuery = ""
+    private var highlightedMessageId: Long = -1L
+    private var selectedMessages = mutableSetOf<Long>()
+    private var recordingStartTime: Long = 0
+    private var recordingFile: File? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private val recordingRunnable = object : Runnable {
+        override fun run() {
+            if (isRecording) {
+                val currentTime = System.currentTimeMillis()
+                val elapsedTime = currentTime - recordingStartTime
+                updateRecordingTime(elapsedTime)
+                handler.postDelayed(this, 1000)
+            }
+        }
+    }
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        if (permissions.all { it.value }) {
+            // 所有权限都已授予
+            startRecording()
+        } else {
+            // 有权限被拒绝
+            Toast.makeText(this, "需要录音权限才能发送语音消息", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private var recordingTipDialog: AlertDialog? = null
+    private var recordingTime = 0
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityChatBinding.inflate(layoutInflater)
@@ -94,7 +152,12 @@ class ChatActivity : AppCompatActivity() {
         messageInput = binding.messageInput
         sendButton = binding.sendButton
         attachButton = binding.attachButton
+        voiceButton = binding.voiceButton
         deleteButton = binding.deleteButton
+
+        // 初始化音频工具
+        audioRecorder = AudioRecorderUtil(this)
+        audioPlayer = AudioPlayerUtil(this)
 
         // 获取当前用户ID
         currentUserId = UserPreferences.getUserId(this)
@@ -115,6 +178,7 @@ class ChatActivity : AppCompatActivity() {
         setupRecyclerView()
         setupSendButton()
         setupAttachButton()
+        setupVoiceButton()
         setupDeleteButton()
         loadChatHistory()
         setupWebSocket()
@@ -138,14 +202,6 @@ class ChatActivity : AppCompatActivity() {
             }, 500)
         }
     }
-
-/*    private fun initViews() {
-        messagesList = binding.messagesList
-        messageInput = binding.messageInput
-        sendButton = binding.sendButton
-        attachButton = binding.attachButton
-        deleteButton = binding.deleteButton
-    }*/
 
     private fun setupRecyclerView() {
         messagesList.layoutManager = LinearLayoutManager(this).apply {
@@ -195,15 +251,6 @@ class ChatActivity : AppCompatActivity() {
 
         messagesList.adapter = adapter
     }
-
-/*    private fun updateSelectedCount(count: Int) {
-        if (isMultiSelectMode) {
-            supportActionBar?.title = "已选择 $count 条消息"
-            if (count == 0) {
-                exitMultiSelectMode()
-            }
-        }
-    }*/
 
     private fun setupSendButton() {
         sendButton.setOnClickListener {
@@ -431,24 +478,6 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-/*    private fun getRealPathFromUri(uri: Uri): String {
-        val projection = arrayOf(android.provider.MediaStore.Images.Media.DATA)
-        val cursor = contentResolver.query(uri, projection, null, null, null)
-        val columnIndex = cursor?.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.DATA)
-        cursor?.moveToFirst()
-        val path = cursor?.getString(columnIndex ?: 0) ?: ""
-        cursor?.close()
-        return path
-    }*/
-
-/*    private fun isImageFile(extension: String): Boolean {
-        return extension in listOf("jpg", "jpeg", "png", "gif", "bmp")
-    }
-
-    private fun isVideoFile(extension: String): Boolean {
-        return extension in listOf("mp4", "avi", "mov", "wmv")
-    }*/
-
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             android.R.id.home -> {
@@ -546,6 +575,12 @@ class ChatActivity : AppCompatActivity() {
         } catch (e: IllegalArgumentException) {
             // 忽略未注册的异常
         }
+
+        // 停止录音和播放
+        if (isRecording) {
+            audioRecorder?.cancelRecording()
+        }
+        audioPlayer.stopAudio()
 
         adapter.onDestroy()  // 清理 Handler
     }
@@ -835,31 +870,24 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-/*    private fun markMessagesAsRead(partnerId: Long, type: String) {
-        lifecycleScope.launch {
-            try {
-                // 使用统一的端点
-                ApiClient.apiService.markSessionAsRead(
-                    userId = UserPreferences.getUserId(this@ChatActivity),
-                    partnerId = partnerId,
-                    type = type
-                )
-            } catch (e: Exception) {
-                println("❌ Error marking messages as read: ${e.message}")
-            }
-        }
-    }*/
-
-    private fun sendMessage(content: String, type: String = "TEXT", fileUrl: String? = null) {
+    private fun sendMessage(content: String, type: String, fileUrl: String? = null) {
         val userId = UserPreferences.getUserId(this)
         val username = UserPreferences.getUsername(this)
+
+        // 如果是文本消息，进行加密
+        val processedContent = if (type == "TEXT") {
+            val encryptedContent = EncryptionUtil.encrypt(content)
+            EncryptionUtil.addEncryptionMark(encryptedContent)
+        } else {
+            content
+        }
 
         val message = username?.let {
             ChatMessage(
                 id = null,
                 senderId = userId,
                 senderName = it,
-                content = content,
+                content = processedContent,
                 type = MessageType.valueOf(type),
                 receiverId = if (chatType == "PRIVATE") partnerId else null,
                 receiverName = if (chatType == "PRIVATE") title else null,
@@ -890,38 +918,12 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-/*    private fun handleInvalidChat() {
-        Toast.makeText(this, "无法获取聊天信息", Toast.LENGTH_SHORT).show()
-        finish()
-    }*/
-
     override fun onPause() {
         super.onPause()
         // 发送广播通知 MessageDisplayFragment 更新会话列表
         val intent = Intent("com.example.appchat.UPDATE_CHAT_SESSIONS")
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
-
-/*    private fun updateMessageSessions() {
-        val userId = UserManager.getCurrentUser()?.id ?: return
-
-        lifecycleScope.launch {
-            try {
-                val response = RetrofitClient.messageService.getMessageSessions(userId)
-                if (response.isSuccessful) {
-                    // 会话列表已更新，通知 MainActivity 刷新
-                    EventBus.getDefault().post(SessionUpdateEvent())
-                } else {
-                    Log.e("ChatActivity", "Failed to update sessions: ${response.code()}")
-                }
-            } catch (e: Exception) {
-                Log.e("ChatActivity", "Error updating sessions", e)
-            }
-        }
-    }*/
-
-    // 添加 SessionUpdateEvent 类
-    class SessionUpdateEvent
 
     private fun showDeleteConfirmDialog(messages: List<ChatMessage>) {
         AlertDialog.Builder(this)
@@ -1057,6 +1059,15 @@ class ChatActivity : AppCompatActivity() {
                     Toast.makeText(this, "需要存储权限才能上传文件", Toast.LENGTH_SHORT).show()
                 }
             }
+            RECORD_AUDIO_PERMISSION_CODE -> {
+                if (grantResults.isNotEmpty() &&
+                    grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+                    // 录音权限已获取，开始录音
+                    startRecording()
+                } else {
+                    Toast.makeText(this, "需要录音权限才能发送语音消息", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
@@ -1092,4 +1103,209 @@ class ChatActivity : AppCompatActivity() {
     fun getCurrentGroupId(): Long = currentGroupId
 
     fun getCurrentPartnerId(): Long = currentReceiverId
+
+    private fun setupVoiceButton() {
+        voiceButton.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    // 开始录音
+                    if (checkAudioPermission()) {
+                        startRecording()
+                        // 显示录音提示
+                        showRecordingTip()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    // 检查是否滑动到取消区域
+                    val cancelArea = isInCancelArea(event.x, event.y)
+                    updateRecordingTip(cancelArea)
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    // 停止录音
+                    val cancelArea = isInCancelArea(event.x, event.y)
+                    if (cancelArea) {
+                        cancelRecording()
+                    } else {
+                        stopRecording()
+                    }
+                    // 隐藏录音提示
+                    hideRecordingTip()
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun showRecordingTip() {
+        // 显示录音提示对话框
+        recordingTipDialog = AlertDialog.Builder(this)
+            .setView(R.layout.dialog_recording_tip)
+            .create()
+        recordingTipDialog?.show()
+        
+        // 开始录音动画
+        startRecordingAnimation()
+    }
+
+    private fun updateRecordingTip(isInCancelArea: Boolean) {
+        // 更新录音提示UI
+        recordingTipDialog?.findViewById<ImageView>(R.id.recordingIcon)?.setImageResource(
+            if (isInCancelArea) R.drawable.ic_cancel else R.drawable.ic_recording
+        )
+        recordingTipDialog?.findViewById<TextView>(R.id.recordingText)?.text = 
+            if (isInCancelArea) "松开手指，取消发送" else "手指上滑，取消发送"
+    }
+
+    private fun hideRecordingTip() {
+        recordingTipDialog?.dismiss()
+        recordingTipDialog = null
+        stopRecordingAnimation()
+    }
+
+    private fun isInCancelArea(x: Float, y: Float): Boolean {
+        // 判断是否滑动到取消区域（上滑超过一定距离）
+        return y < voiceButton.top - 100 // 可以根据需要调整距离
+    }
+
+    private fun startRecordingAnimation() {
+        // 开始录音动画
+        handler.post(recordingRunnable)
+    }
+
+    private fun stopRecordingAnimation() {
+        // 停止录音动画
+        handler.removeCallbacks(recordingRunnable)
+    }
+
+    private fun updateRecordingTime(elapsedTime: Long) {
+        val seconds = (elapsedTime / 1000).toInt()
+        recordingTipDialog?.findViewById<TextView>(R.id.recordingTime)?.text = 
+            String.format("%02d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private fun startRecording() {
+        try {
+            recordingTime = 0
+            recordingStartTime = System.currentTimeMillis()
+            isRecording = true
+            audioRecorder = AudioRecorderUtil(this)
+            audioRecorder?.setOnErrorListener { error ->
+                Toast.makeText(this, error, Toast.LENGTH_SHORT).show()
+                hideRecordingTip()
+            }
+            audioRecorder?.startRecording()
+            // 开始更新录音时间
+            handler.post(recordingRunnable)
+        } catch (e: Exception) {
+            Toast.makeText(this, "录音失败: ${e.message}", Toast.LENGTH_SHORT).show()
+            hideRecordingTip()
+        }
+    }
+
+    private fun stopRecording() {
+        try {
+            isRecording = false
+            handler.removeCallbacks(recordingRunnable)
+            audioRecorder?.stopRecording()?.let { file ->
+                if (file.exists() && file.length() > 0) {
+                    uploadAudioFile(file)
+                } else {
+                    Toast.makeText(this, "录音文件无效", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "停止录音失败: ${e.message}", Toast.LENGTH_SHORT).show()
+        } finally {
+            audioRecorder = null
+        }
+    }
+
+    private fun cancelRecording() {
+        try {
+            isRecording = false
+            handler.removeCallbacks(recordingRunnable)
+            audioRecorder?.cancelRecording()
+            Toast.makeText(this, "已取消录音", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "取消录音失败: ${e.message}", Toast.LENGTH_SHORT).show()
+        } finally {
+            audioRecorder = null
+        }
+    }
+
+    private fun uploadAudioFile(file: File) {
+        lifecycleScope.launch {
+            try {
+                val requestFile = file.asRequestBody("audio/m4a".toMediaTypeOrNull())
+                val body = MultipartBody.Part.createFormData("file", file.name, requestFile)
+                
+                val response = ApiClient.apiService.uploadFile(body)
+                if (response.isSuccessful) {
+                    response.body()?.let { fileResponse ->
+                        sendAudioMessage(fileResponse.url)
+                    } ?: run {
+                        Toast.makeText(this@ChatActivity, "上传失败：服务器返回为空", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    Toast.makeText(this@ChatActivity, "上传失败：${response.code()}", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this@ChatActivity, "上传失败：${e.message}", Toast.LENGTH_SHORT).show()
+            } finally {
+                file.delete()
+            }
+        }
+    }
+
+    private fun sendAudioMessage(audioUrl: String) {
+        val message = ChatMessage(
+            id = null,
+            senderId = currentUserId,
+            senderName = UserPreferences.getUsername(this) ?: "",
+            content = audioUrl,
+            type = MessageType.AUDIO,
+            receiverId = if (currentChatType == "PRIVATE") currentReceiverId else null,
+            receiverName = if (currentChatType == "PRIVATE") receiverName else null,
+            groupId = if (currentChatType == "GROUP") currentGroupId else null,
+            groupName = if (currentChatType == "GROUP") title else null,
+            timestamp = LocalDateTime.now(),
+            fileUrl = audioUrl,
+            chatType = currentChatType
+        )
+        
+        // 发送到服务器
+        WebSocketManager.sendMessage(message,
+            onSuccess = {
+                runOnUiThread {
+                    adapter.addMessage(message)
+                    messagesList.scrollToPosition(adapter.itemCount - 1)
+                }
+            },
+            onError = { error ->
+                runOnUiThread {
+                    Toast.makeText(this, "发送失败: $error", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+
+    private fun checkAudioPermission(): Boolean {
+        return if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            true
+        } else {
+            requestPermissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+            false
+        }
+    }
+
+    companion object {
+        private const val RECORD_AUDIO_PERMISSION_CODE = 1002
+    }
 }

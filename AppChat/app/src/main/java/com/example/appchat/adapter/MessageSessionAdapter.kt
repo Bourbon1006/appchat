@@ -24,6 +24,7 @@ import kotlinx.coroutines.Job
 import androidx.lifecycle.LifecycleOwner
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import android.util.Log
+import com.example.appchat.util.EncryptionUtil
 
 class MessageSessionAdapter(
     private val onItemClick: (MessageSession) -> Unit,
@@ -68,44 +69,88 @@ class MessageSessionAdapter(
         // 加载头像
         Glide.with(holder.itemView.context)
             .load(avatarUrl)
-            .skipMemoryCache(true)
-            .diskCacheStrategy(DiskCacheStrategy.NONE)
-            .circleCrop()
-            .placeholder(
-                if (session.type?.uppercase() == "GROUP") 
-                    R.drawable.default_group_avatar 
-                else 
-                    R.drawable.default_avatar
-            )
-            .error(
-                if (session.type?.uppercase() == "GROUP") 
-                    R.drawable.default_group_avatar 
-                else 
-                    R.drawable.default_avatar
-            )
+            .apply(RequestOptions()
+                .placeholder(R.drawable.default_avatar)
+                .error(R.drawable.default_avatar)
+                .diskCacheStrategy(DiskCacheStrategy.ALL)
+                .circleCrop())
             .into(holder.avatar)
-
-        // 设置名称 - 确保使用 partnerName，它应该已经是 nickname
-        holder.name.text = session.partnerName  // partnerName 应该已经是 nickname
-
-        // 设置最后一条消息
-        holder.lastMessage.text = session.lastMessage
-
+        
+        // 设置名称
+        holder.name.text = session.partnerName
+        
+        // 解密并设置最后一条消息
+        val decryptedMessage = if (EncryptionUtil.isEncrypted(session.lastMessage)) {
+            EncryptionUtil.decrypt(EncryptionUtil.removeEncryptionMark(session.lastMessage))
+        } else {
+            session.lastMessage
+        }
+        
+        // 根据文件扩展名判断消息类型
+        holder.lastMessage.text = when {
+            // 语音消息
+            decryptedMessage.endsWith(".m4a", true) || 
+            decryptedMessage.endsWith(".mp3", true) || 
+            decryptedMessage.endsWith(".wav", true) || 
+            decryptedMessage.endsWith(".aac", true) || 
+            decryptedMessage.endsWith(".ogg", true) -> "语音消息"
+            // 图片消息
+            decryptedMessage.endsWith(".jpg", true) || 
+            decryptedMessage.endsWith(".jpeg", true) || 
+            decryptedMessage.endsWith(".png", true) || 
+            decryptedMessage.endsWith(".gif", true) || 
+            decryptedMessage.endsWith(".bmp", true) -> "图片"
+            // 视频消息
+            decryptedMessage.endsWith(".mp4", true) || 
+            decryptedMessage.endsWith(".avi", true) || 
+            decryptedMessage.endsWith(".mov", true) || 
+            decryptedMessage.endsWith(".wmv", true) || 
+            decryptedMessage.endsWith(".flv", true) -> "视频"
+            // PDF文件
+            decryptedMessage.endsWith(".pdf", true) -> "PDF文件"
+            // Word文档
+            decryptedMessage.endsWith(".doc", true) || 
+            decryptedMessage.endsWith(".docx", true) || 
+            decryptedMessage.endsWith(".rtf", true) -> "Word文档"
+            // Excel文件
+            decryptedMessage.endsWith(".xls", true) || 
+            decryptedMessage.endsWith(".xlsx", true) || 
+            decryptedMessage.endsWith(".csv", true) -> "Excel文件"
+            // PPT文件
+            decryptedMessage.endsWith(".ppt", true) || 
+            decryptedMessage.endsWith(".pptx", true) -> "PPT文件"
+            // 其他文件
+            decryptedMessage.contains("/api/files/") -> "文件"
+            // 普通文本消息
+            else -> decryptedMessage
+        }
+        
         // 设置时间
-        holder.time.text = formatTime(session.lastMessageTime)
-
+        try {
+            val messageTime = LocalDateTime.parse(session.lastMessageTime)
+            val now = LocalDateTime.now()
+            val formatter = DateTimeFormatter.ofPattern("HH:mm")
+            
+            holder.time.text = when {
+                messageTime.toLocalDate() == now.toLocalDate() -> messageTime.format(formatter)
+                messageTime.toLocalDate() == now.toLocalDate().minusDays(1) -> "昨天"
+                messageTime.toLocalDate() == now.toLocalDate().minusDays(2) -> "前天"
+                messageTime.year == now.year -> messageTime.format(DateTimeFormatter.ofPattern("MM-dd"))
+                else -> messageTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+            }
+        } catch (e: Exception) {
+            Log.e("MessageSessionAdapter", "Error parsing time: ${e.message}")
+            holder.time.text = session.lastMessageTime
+        }
+        
         // 设置未读消息数
         if (session.unreadCount > 0) {
-            println("🔴 Showing unread count: ${session.unreadCount}")
-            holder.unreadCount.apply {
-                visibility = View.VISIBLE
-                text = session.unreadCount.toString()
-                setBackgroundResource(R.drawable.bg_unread_count)
-            }
+            holder.unreadCount.visibility = View.VISIBLE
+            holder.unreadCount.text = if (session.unreadCount > 99) "99+" else session.unreadCount.toString()
         } else {
             holder.unreadCount.visibility = View.GONE
         }
-
+        
         // 设置点击事件
         holder.itemView.setOnClickListener {
             onItemClick(session)

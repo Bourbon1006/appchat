@@ -46,6 +46,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.coroutineScope
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
+import com.example.appchat.event.SessionUpdateEvent
 
 class MainActivity : AppCompatActivity() {
     // 将 binding 改为 internal，这样同包的类可以访问
@@ -276,7 +277,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     @Subscribe(threadMode = ThreadMode.MAIN)
-    fun onSessionUpdate(@Suppress("UNUSED_PARAMETER") event: ChatActivity.SessionUpdateEvent) {
+    fun onSessionUpdate(event: SessionUpdateEvent) {
         // 收到会话更新事件，刷新会话列表
         loadMessageSessions()
     }
